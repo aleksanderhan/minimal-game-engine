@@ -21,20 +21,26 @@ from direct.gui.OnscreenText import OnscreenText
 from panda3d.bullet import BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape
 import tkinter as tk
 from direct.actor.Actor import Actor
-
-# Disable sync-video to unlimit the FPS
-loadPrcFileData('', 'sync-video #f')
-loadPrcFileData('', 'clock-mode limited')
-loadPrcFileData('', 'clock-frame-rate 0')
-
-# Use tkinter to get the screen resolution
-root = tk.Tk()
-width = root.winfo_screenwidth()
-height = root.winfo_screenheight()
-root.destroy()
-
-# Set the window size to the screen resolution
-#loadPrcFileData('', f'win-size {width} {height}')
+import noise
+from direct.showbase.ShowBase import ShowBase
+from panda3d.core import (
+    CardMaker, Vec3, KeyboardButton, WindowProperties, NodePath,
+    AmbientLight, DirectionalLight, LColor, TextNode
+)
+from panda3d.bullet import (
+    BulletWorld, BulletRigidBodyNode, BulletSphereShape,
+    BulletHeightfieldShape  # This is conceptual
+)
+from direct.task import Task
+from direct.showbase.InputStateGlobal import inputState
+from direct.gui.OnscreenText import OnscreenText
+import numpy as np
+import noise
+import tkinter as tk
+from panda3d.bullet import BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape, BulletTriangleMesh, BulletTriangleMeshShape
+from panda3d.core import Geom, GeomNode, GeomVertexData, GeomVertexFormat
+from panda3d.core import GeomVertexWriter, GeomTriangles, NodePath
+from panda3d.core import LineSegs
 
 
 class GameEngine(ShowBase):
@@ -65,18 +71,26 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
 
+ 
+
+    def configure_window(self):
+        # Configure window size and FPS settings
+        loadPrcFileData('', 'sync-video #f')
+        loadPrcFileData('', 'clock-mode limited')
+        loadPrcFileData('', 'clock-frame-rate 0')
+        root = tk.Tk()
+        width, height = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.destroy()
+        loadPrcFileData('', f'win-size {width} {height}')
 
     def setupBulletPhysics(self):
         self.physicsWorld = BulletWorld()
         self.physicsWorld.setGravity(Vec3(0, 0, -9.81))
-
-        # Create a ground plane
-        groundShape = BulletPlaneShape(Vec3(0, 0, 1), 0)
-        groundNode = BulletRigidBodyNode('Ground')
-        groundNode.addShape(groundShape)
-        groundNP = self.render.attachNewNode(groundNode)
-        groundNP.setPos(0, 0, 0)  # Adjust if needed based on your scene setup
-        self.physicsWorld.attachRigidBody(groundNode)
+        # Placeholder for terrain physics, assuming flat ground for simplicity
+        groundShape = BulletRigidBodyNode('Ground')
+        groundNP = self.render.attachNewNode(groundShape)
+        groundNP.setPos(0, 0, -0.5)  # Adjust based on your scene
+        self.physicsWorld.attachRigidBody(groundShape)
 
     def updatePhysics(self, task):
         dt = globalClock.getDt()
@@ -116,43 +130,127 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
+    
     def setup_environment(self):
-        """Create a chessboard ground with basic colors and a sphere."""
-        board_size = 16  # nxn chessboard
-        square_size = 2  # Each square has a size of 2x2 units
+        # Create the terrain mesh (both visual and physical)
+        self.create_terrain_mesh()
+        self.create_sphere((16, 16, 10))
+        self.create_sphere((16, 16, 15))
+        self.create_sphere((16, 16, 20))
+        self.create_sphere((16, 16, 25))
+        self.create_sphere((16, 16, 30))
+
+
+    def draw_mesh_edges(self, v0, v1, v2):
+        lines = LineSegs()
+        lines.setColor(0, 0, 0, 1)  # Black color for the lines
+        lines.setThickness(2.0)  # Adjust the thickness of the lines
+
+        # Define the lines for the triangle's edges
+        lines.moveTo(v0)
+        lines.drawTo(v1)
+        lines.drawTo(v2)
+        lines.drawTo(v0)
+
+        # Create the node and attach it to the render
+        line_node = lines.create()
+        self.render.attachNewNode(line_node)
+
+
+    def create_terrain_mesh(self):
+        board_size = 64  # Define the size of the terrain
+        scale = 0.1  # Scale factor for Perlin noise
+        height_scale = 3  # Scale factor for height to make terrain more pronounced
+
+        # Step 1: Generate the height map
+        height_map = self.generate_height_map(board_size)
+
+        # Prepare to create visual mesh
+        format = GeomVertexFormat.getV3n3c4()  # Format for vertices with position, normal, and color
+        vdata = GeomVertexData('terrain', format, Geom.UHStatic)
+        vertex = GeomVertexWriter(vdata, 'vertex')
+        normal = GeomVertexWriter(vdata, 'normal')
+        color = GeomVertexWriter(vdata, 'color')
+        prim = GeomTriangles(Geom.UHStatic)
+
+        # Step 2: Create the visual mesh
+        terrainMesh = BulletTriangleMesh()  # For the physical mesh
+
+        vertex_count = 0  # Initialize a count of vertices added
+
+        for x in range(board_size - 1):
+            for y in range(board_size - 1):
+                # Calculate vertex positions
+                z00 = height_map[x][y] * height_scale
+                z10 = height_map[x + 1][y] * height_scale
+                z01 = height_map[x][y + 1] * height_scale
+                z11 = height_map[x + 1][y + 1] * height_scale
+                
+                v0 = Vec3(x, y, z00)
+                v1 = Vec3(x + 1, y, z10)
+                v2 = Vec3(x, y + 1, z01)
+                v3 = Vec3(x + 1, y + 1, z11)
+
+                # After defining triangles for visual mesh, draw the edges
+                self.draw_mesh_edges(v0, v1, v2)
+                self.draw_mesh_edges(v2, v1, v3)
+
+                # Add vertices for two triangles (v0, v2, v1) and (v2, v1, v3)
+                for v in [v0, v1, v2, v2, v1, v3]:
+                    vertex.addData3f(v.x, v.y, v.z)
+                    normal.addData3f(0, 0, 1)  # Simplified normal calculation
+                    color.addData4f(0.5, 0.5, 0.5, 1)  # Greyscale color
+                    vertex_count += 1
+
+                # Define triangles using the vertices just added
+                base = vertex_count - 6
+                prim.addVertices(base, base + 1, base + 2)
+                prim.addVertices(base + 3, base + 4, base + 5)
+
+                # Add to physical mesh
+                terrainMesh.addTriangle(v0, v1, v2)
+                terrainMesh.addTriangle(v2, v1, v3)
+
+        # Create and attach the visual node
+        geom = Geom(vdata)
+        geom.addPrimitive(prim)
+        node = GeomNode('terrain')
+        node.addGeom(geom)
+        nodePath = NodePath(node)
+        nodePath.reparentTo(self.render)
+
+        # Step 3: Create the physical mesh
+        terrainShape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
+        terrainNode = BulletRigidBodyNode('Terrain')
+        terrainNode.addShape(terrainShape)
+        terrainNP = self.render.attachNewNode(terrainNode)
+        self.physicsWorld.attachRigidBody(terrainNode)
+
+
+
+
+    def generate_height_map(self, board_size):
+        """Generate a height map using Perlin noise."""
+        square_size = 2
+        scale = 0.1
+        octaves = 1
+        persistence = 0.5
+        lacunarity = 2.0
+        base = 0
+        height_map = np.zeros((board_size, board_size))
+        
         for x in range(board_size):
             for y in range(board_size):
-                cm = CardMaker(f'square_{x}_{y}')
-                cm.setFrame(-square_size / 2, square_size / 2, -square_size / 2, square_size / 2)
-                square = NodePath(cm.generate())
-                square.reparentTo(self.render)
-                square.setX((x - board_size / 2) * square_size + square_size / 2)
-                square.setY((y - board_size / 2) * square_size + square_size / 2)
-                square.setZ(0)  # Ensure all squares are at ground level
-
-                # Rotate the square to lay flat
-                square.setP(-90)  # Rotate 90 degrees around the X-axis
-
-                if (x + y) % 2 == 0:
-                    square.setColor(1, 1, 1, 1)  # White squares
-                else:
-                    square.setColor(0, 0, 0, 1)  # Black squares
-
-        self.create_sphere((0, 0, 10))
-        self.create_sphere((0, 0, 20))
-
-        # Add some basic lighting to make sure the chessboard and sphere are well-lit
-        alight = AmbientLight('alight')
-        alight.setColor(LColor(0.5, 0.5, 0.5, 1))
-        alnp = self.render.attachNewNode(alight)
-        self.render.setLight(alnp)
-
-        dlight = DirectionalLight('dlight')
-        dlight.setColor(LColor(0.8, 0.8, 0.8, 1))
-        dlnp = self.render.attachNewNode(dlight)
-        dlight.setDirection((-1, -1, -1))
-        self.render.setLight(dlnp)
-
+                height_map[x][y] = noise.pnoise2(x * scale,
+                                                 y * scale,
+                                                 octaves=octaves,
+                                                 persistence=persistence,
+                                                 lacunarity=lacunarity,
+                                                 repeatx=board_size,
+                                                 repeaty=board_size,
+                                                 base=base) * 5  # Scale height
+        return height_map
+    
     def create_sphere(self, position):
         # Sphere physics
         sphereShape = BulletSphereShape(1)  # Match this with the scale of your sphere model
