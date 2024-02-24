@@ -41,12 +41,14 @@ from panda3d.bullet import BulletWorld, BulletPlaneShape, BulletRigidBodyNode, B
 from panda3d.core import Geom, GeomNode, GeomVertexData, GeomVertexFormat
 from panda3d.core import GeomVertexWriter, GeomTriangles, NodePath
 from panda3d.core import LineSegs
+import pyautogui
 
 
 class GameEngine(ShowBase):
     def __init__(self):
         super().__init__()
         self.disableMouse()
+        self.configure_window()
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
@@ -144,13 +146,18 @@ class GameEngine(ShowBase):
     def draw_mesh_edges(self, v0, v1, v2):
         lines = LineSegs()
         lines.setColor(0, 0, 0, 1)  # Black color for the lines
-        lines.setThickness(2.0)  # Adjust the thickness of the lines
+        lines.setThickness(2.0)  # Thickness of the lines
+
+        # Convert numpy.ndarray to Vec3
+        v0_vec3 = Vec3(v0[0], v0[1], v0[2])
+        v1_vec3 = Vec3(v1[0], v1[1], v1[2])
+        v2_vec3 = Vec3(v2[0], v2[1], v2[2])
 
         # Define the lines for the triangle's edges
-        lines.moveTo(v0)
-        lines.drawTo(v1)
-        lines.drawTo(v2)
-        lines.drawTo(v0)
+        lines.moveTo(v0_vec3)
+        lines.drawTo(v1_vec3)
+        lines.drawTo(v2_vec3)
+        lines.drawTo(v0_vec3)
 
         # Create the node and attach it to the render
         line_node = lines.create()
@@ -158,60 +165,63 @@ class GameEngine(ShowBase):
 
 
     def create_terrain_mesh(self):
-        board_size = 64  # Define the size of the terrain
-        scale = 0.1  # Scale factor for Perlin noise
-        height_scale = 3  # Scale factor for height to make terrain more pronounced
+        board_size = 64
+        height_scale = 3
 
-        # Step 1: Generate the height map
+        # Generate the height map
         height_map = self.generate_height_map(board_size)
 
-        # Prepare to create visual mesh
-        format = GeomVertexFormat.getV3n3c4()  # Format for vertices with position, normal, and color
+        # Generate mesh data
+        vertices, indices = self.create_mesh_data(height_map, board_size, height_scale)
+
+        # Add mesh to Geom for visual representation
+        self.add_mesh_to_geom(vertices, indices)
+
+        # Add mesh to Bullet for physics simulation
+        self.add_mesh_to_physics(vertices, indices)
+
+    def create_mesh_data(self, height_map, board_size, height_scale):
+        # Assuming height_map is a 2D NumPy array
+        x, y = np.meshgrid(np.arange(board_size), np.arange(board_size), indexing='ij')
+        z = height_map * height_scale
+        vertices = np.stack([x, y, z], axis=-1).reshape(-1, 3).astype(np.float32)
+
+        # Efficiently compute indices for a grid mesh
+        indices = np.array([[y * board_size + x,
+                            (y + 1) * board_size + x,
+                            y * board_size + (x + 1),
+                            y * board_size + (x + 1),
+                            (y + 1) * board_size + x,
+                            (y + 1) * board_size + (x + 1)]
+                            for x in range(board_size - 1) for y in range(board_size - 1)]).flatten()
+
+        return vertices, indices.astype(int)
+
+
+    def add_mesh_to_geom(self, vertices, indices):
+        format = GeomVertexFormat.getV3n3c4()
         vdata = GeomVertexData('terrain', format, Geom.UHStatic)
         vertex = GeomVertexWriter(vdata, 'vertex')
         normal = GeomVertexWriter(vdata, 'normal')
         color = GeomVertexWriter(vdata, 'color')
+
+        # Add vertices
+        for v in vertices:
+            vertex.addData3f(*v)
+            normal.addData3f(0, 0, 1)  # Assume up vector for simplicity
+            color.addData4f(0.5, 0.5, 0.5, 1)  # Greyscale
+
+        # Create triangles
         prim = GeomTriangles(Geom.UHStatic)
 
-        # Step 2: Create the visual mesh
-        terrainMesh = BulletTriangleMesh()  # For the physical mesh
+        # Iterate through indices and add vertices to the primitive
+        for i in range(0, len(indices), 3):
+            prim.addVertices(indices[i], indices[i+1], indices[i+2])
+            # Draw edges for each triangle
+            self.draw_mesh_edges(vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]])
 
-        vertex_count = 0  # Initialize a count of vertices added
+        prim.closePrimitive()
 
-        for x in range(board_size - 1):
-            for y in range(board_size - 1):
-                # Calculate vertex positions
-                z00 = height_map[x][y] * height_scale
-                z10 = height_map[x + 1][y] * height_scale
-                z01 = height_map[x][y + 1] * height_scale
-                z11 = height_map[x + 1][y + 1] * height_scale
-                
-                v0 = Vec3(x, y, z00)
-                v1 = Vec3(x + 1, y, z10)
-                v2 = Vec3(x, y + 1, z01)
-                v3 = Vec3(x + 1, y + 1, z11)
-
-                # After defining triangles for visual mesh, draw the edges
-                self.draw_mesh_edges(v0, v1, v2)
-                self.draw_mesh_edges(v2, v1, v3)
-
-                # Add vertices for two triangles (v0, v2, v1) and (v2, v1, v3)
-                for v in [v0, v1, v2, v2, v1, v3]:
-                    vertex.addData3f(v.x, v.y, v.z)
-                    normal.addData3f(0, 0, 1)  # Simplified normal calculation
-                    color.addData4f(0.5, 0.5, 0.5, 1)  # Greyscale color
-                    vertex_count += 1
-
-                # Define triangles using the vertices just added
-                base = vertex_count - 6
-                prim.addVertices(base, base + 1, base + 2)
-                prim.addVertices(base + 3, base + 4, base + 5)
-
-                # Add to physical mesh
-                terrainMesh.addTriangle(v0, v1, v2)
-                terrainMesh.addTriangle(v2, v1, v3)
-
-        # Create and attach the visual node
         geom = Geom(vdata)
         geom.addPrimitive(prim)
         node = GeomNode('terrain')
@@ -219,14 +229,19 @@ class GameEngine(ShowBase):
         nodePath = NodePath(node)
         nodePath.reparentTo(self.render)
 
-        # Step 3: Create the physical mesh
+
+
+    def add_mesh_to_physics(self, vertices, indices):
+        terrainMesh = BulletTriangleMesh()
+        for i in range(0, len(indices), 3):
+            v0, v1, v2 = vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]]
+            terrainMesh.addTriangle(Vec3(*v0), Vec3(*v1), Vec3(*v2))
+
         terrainShape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
         terrainNode = BulletRigidBodyNode('Terrain')
         terrainNode.addShape(terrainShape)
         terrainNP = self.render.attachNewNode(terrainNode)
         self.physicsWorld.attachRigidBody(terrainNode)
-
-
 
 
     def generate_height_map(self, board_size):
@@ -277,24 +292,32 @@ class GameEngine(ShowBase):
         self.cameraPitch = 0
         self.cameraHeading = 0
 
+    
     def mouse_task(self, task):
-        """Updates the camera's orientation based on mouse movement."""
         if self.mouseWatcherNode.hasMouse():
             mouseX, mouseY = self.mouseWatcherNode.getMouseX(), self.mouseWatcherNode.getMouseY()
-            if not self.firstUpdate:
-                deltaX = mouseX - self.lastMouseX
-                deltaY = mouseY - self.lastMouseY
-
-                # Invert the direction of the deltaX and deltaY by multiplying them by -1
-                self.cameraHeading -= deltaX * self.mouseSpeedX 
-                self.cameraPitch = max(min(self.cameraPitch - deltaY * self.mouseSpeedY * -1, 90), -90)  # Invert vertical direction
-
-                self.camera.setHpr(self.cameraHeading, self.cameraPitch, 0)
+            
+            # Calculate deltas as before
+            deltaX = mouseX - self.lastMouseX
+            deltaY = mouseY - self.lastMouseY
+            
+            # Update camera orientation
+            self.cameraHeading -= deltaX * self.mouseSpeedX
+            self.cameraPitch = max(min(self.cameraPitch + deltaY * self.mouseSpeedY, 90), -90)
+            
+            self.camera.setHpr(self.cameraHeading, self.cameraPitch, 0)
+            
+            # Check if cursor is near the edge, then re-center it
+            screenWidth, screenHeight = pyautogui.size()
+            currentMouseX, currentMouseY = pyautogui.position()
+            
+            if currentMouseX <= 1 or currentMouseX >= screenWidth - 2 or currentMouseY <= 1 or currentMouseY >= screenHeight - 2:
+                # Move cursor to the center of the screen
+                pyautogui.moveTo(screenWidth / 2, screenHeight / 2)
+                self.lastMouseX, self.lastMouseY = 0, 0  # Reset last mouse position to the center
             else:
-                self.firstUpdate = False
+                self.lastMouseX, self.lastMouseY = mouseX, mouseY
 
-            self.lastMouseX = mouseX
-            self.lastMouseY = mouseY
         return Task.cont
 
 
