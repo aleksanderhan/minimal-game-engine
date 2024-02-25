@@ -1,5 +1,4 @@
 import numpy as np
-import tkinter as tk
 import noise
 import pyautogui
 import argparse

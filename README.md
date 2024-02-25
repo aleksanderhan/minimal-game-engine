@@ -24,6 +24,6 @@ Run it with the perlin flag: `python game_engine.py --perlin` for a world genera
 Use the keys a,s,d,w to steer the position of the camera and use the mouse to steer the angle of the camera. Use left mouse click to shot.
 
 ## Demo
-![Semi-autogpt example](demo.gif)
+![Semi-autogpt example](docs/demo.gif)
 
-![Semi-autogpt example](demo2.gif)
+![Semi-autogpt example](docs/demo2.gif)
