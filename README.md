@@ -1,6 +1,6 @@
 # minimal-game-engine
 
-Minimal game engine written python.
+Minimal game engine written in python.
 
 ## Instructions
 

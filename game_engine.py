@@ -25,7 +25,9 @@ from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, 
 from panda3d.core import Vec3, TransformState
 from math import cos, sin, radians
 from panda3d.core import Texture
+import random
 
+random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
 
@@ -58,6 +60,7 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.updatePhysics, "updatePhysics")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
+        self.accept('mouse3', self.shoot_big_bullet)
 
     def build_robot(self):
         # Create spherical body
@@ -164,16 +167,38 @@ class GameEngine(ShowBase):
             # Create and shoot the bullet
             self.create_bullet(position, velocity)
     
-    def create_bullet(self, position, velocity):
+    def shoot_big_bullet(self):
+        if self.mouseWatcherNode.hasMouse():
+            # Get the mouse position in the world
+            mpos = self.mouseWatcherNode.getMouse()
+            
+            # Use the camera's position and orientation to shoot the bullet
+            position = self.camera.getPos()
+            direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
+            velocity = direction * 30  # Adjust the speed as necessary
+            
+            # Create and shoot the bullet
+            self.create_bullet(position, velocity, True)
+
+
+    def create_bullet(self, position, velocity, big_bullet=False):
         # Bullet model
         bullet_model = self.loader.loadModel("models/misc/sphere.egg")  # Use a simple sphere model
-        bullet_model.setScale(0.2)  # Scale down to bullet size
+        bullet_node = BulletRigidBodyNode('Bullet')
         
         # Bullet physics
-        bullet_shape = BulletSphereShape(0.2)  # The collision shape radius
-        bullet_node = BulletRigidBodyNode('Bullet')
+        if big_bullet:
+            bullet_model.setScale(1)  # Scale down to bullet size
+            bullet_shape = BulletSphereShape(1)  # The collision shape radius
+            bullet_node.setMass(10) 
+            bullet_model.setColor(1, 0, 0, 1)
+        else:
+            bullet_model.setScale(0.2)  # Scale down to bullet size
+            bullet_shape = BulletSphereShape(0.2)  # The collision shape radius
+            bullet_node.setMass(0.1)
+        
+        
         bullet_node.addShape(bullet_shape)
-        bullet_node.setMass(0.1)
         bullet_node.setLinearVelocity(velocity)  # Set initial velocity
         
         bullet_np = self.render.attachNewNode(bullet_node)
