@@ -2,6 +2,7 @@ import numpy as np
 import tkinter as tk
 import noise
 import pyautogui
+import argparse
 
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
@@ -23,15 +24,17 @@ from panda3d.bullet import (
 
 
 class GameEngine(ShowBase):
-    def __init__(self):
+
+    def __init__(self, args):
         super().__init__()
-        self.disableMouse()
+        self.isPerlin = args.perlin
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
 
         self.setupBulletPhysics()
         self.setup_environment()
+        self.setup_lighting()
 
 
         self.firstUpdate = True  # Add this line to initialize firstUpdate
@@ -49,6 +52,20 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.updatePhysics, "updatePhysics")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
+
+    def setup_lighting(self):
+        # Ambient Light
+        ambient_light = AmbientLight('ambient_light')
+        ambient_light.setColor((0.2, 0.2, 0.2, 1))
+        ambient_light_np = self.render.attachNewNode(ambient_light)
+        self.render.setLight(ambient_light_np)
+        
+        # Directional Light
+        directional_light = DirectionalLight('directional_light')
+        directional_light.setColor((0.8, 0.8, 0.8, 1))
+        directional_light_np = self.render.attachNewNode(directional_light)
+        directional_light_np.setHpr(0, -60, 0)
+        self.render.setLight(directional_light_np)
 
 
     def setupBulletPhysics(self):
@@ -135,7 +152,10 @@ class GameEngine(ShowBase):
         height_scale = 3
 
         # Generate the height map
-        height_map = self.generate_height_map(board_size)
+        if self.isPerlin:
+            height_map = self.generate_perlin_height_map(board_size)
+        else:
+            height_map = self.generate_flat_height_map(board_size)
 
         # Generate mesh data
         vertices, indices = self.create_mesh_data(height_map, board_size, height_scale)
@@ -210,13 +230,12 @@ class GameEngine(ShowBase):
         self.physicsWorld.attachRigidBody(terrainNode)
 
 
-    def generate_height_map(self, board_size):
+    def generate_perlin_height_map(self, board_size):
         """Generate a height map using Perlin noise."""
-        square_size = 2
         scale = 0.1
-        octaves = 1
-        persistence = 0.5
-        lacunarity = 2.0
+        octaves = 3
+        persistence = 1.0
+        lacunarity = 0.5
         base = 0
         height_map = np.zeros((board_size, board_size))
         
@@ -231,6 +250,13 @@ class GameEngine(ShowBase):
                                                  repeaty=board_size,
                                                  base=base) * 5  # Scale height
         return height_map
+    
+    def generate_flat_height_map(self, board_size, height=0):
+        """Generate a completely flat height map."""
+        # Create a 2D NumPy array filled with the specified height value
+        height_map = np.full((board_size, board_size), height)
+        return height_map
+
     
     def create_sphere(self, position):
         # Sphere physics
@@ -344,5 +370,11 @@ class GameEngine(ShowBase):
         return Task.cont
 
 
-game = GameEngine()
-game.run()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--perlin', action='store_true')
+    args = parser.parse_args()
+
+    game = GameEngine(args)
+    game.run()
