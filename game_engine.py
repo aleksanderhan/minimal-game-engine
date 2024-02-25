@@ -33,7 +33,7 @@ class GameEngine(ShowBase):
 
     def __init__(self, args):
         super().__init__()
-        self.isPerlin = args.perlin
+        self.args = args
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
@@ -56,7 +56,6 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
         self.taskMgr.add(self.updatePhysics, "updatePhysics")
-        #self.taskMgr.add(self.follow_actor_task, "FollowActorTask")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
 
@@ -195,33 +194,12 @@ class GameEngine(ShowBase):
         self.create_sphere((32, 32, 25))
 
 
-    def draw_mesh_edges(self, v0, v1, v2):
-        lines = LineSegs()
-        lines.setColor(0, 0, 0, 1)  # Black color for the lines
-        lines.setThickness(2.0)  # Thickness of the lines
-
-        # Convert numpy.ndarray to Vec3
-        v0_vec3 = Vec3(v0[0], v0[1], v0[2])
-        v1_vec3 = Vec3(v1[0], v1[1], v1[2])
-        v2_vec3 = Vec3(v2[0], v2[1], v2[2])
-
-        # Define the lines for the triangle's edges
-        lines.moveTo(v0_vec3)
-        lines.drawTo(v1_vec3)
-        lines.drawTo(v2_vec3)
-        lines.drawTo(v0_vec3)
-
-        # Create the node and attach it to the render
-        line_node = lines.create()
-        self.render.attachNewNode(line_node)
-
-
     def create_terrain_mesh(self):
         board_size = 64
         height_scale = 3
 
         # Generate the height map
-        if self.isPerlin:
+        if self.args.terrain == "perlin":
             height_map = self.generate_perlin_height_map(board_size)
         else:
             height_map = self.generate_flat_height_map(board_size)
@@ -229,11 +207,72 @@ class GameEngine(ShowBase):
         # Generate mesh data
         vertices, indices = self.create_mesh_data(height_map, board_size, height_scale)
 
+        if self.args.texture == "grass":
+            self.apply_texture_to_terrain(board_size, vertices, indices, "assets/grass.png")
+        else:
+            self.apply_texture_to_terrain(board_size, vertices, indices, "assets/chess.png")
+
         # Add mesh to Geom for visual representation
-        self.add_mesh_to_geom(vertices, indices)
+        #self.add_mesh_to_geom(vertices, indices)
 
         # Add mesh to Bullet for physics simulation
         self.add_mesh_to_physics(vertices, indices)
+
+    def apply_texture_to_terrain(self, board_size, vertices, indices, texture_path):
+        # Load the texture
+        terrainTexture = loader.loadTexture(texture_path)
+        if terrainTexture:
+            print("Texture loaded successfully.")
+        else:
+            print("Failed to load texture.")
+
+        terrainTexture.setWrapU(Texture.WMRepeat)
+        terrainTexture.setWrapV(Texture.WMRepeat)
+
+        # Create the terrain geometry
+        format = GeomVertexFormat.getV3n3t2()  # Format including normals and texture coordinates
+        vdata = GeomVertexData('terrain', format, Geom.UHStatic)
+
+        # Writers for data
+        vertex = GeomVertexWriter(vdata, 'vertex')
+        normal = GeomVertexWriter(vdata, 'normal')
+        texcoord = GeomVertexWriter(vdata, 'texcoord')
+
+        # Assuming you have a method to calculate UVs correctly based on vertices
+        uv_coords = self.calculate_uv_coordinates(vertices, board_size)
+
+        # Add vertices, normals, and UVs to the vertex data
+        for i, v in enumerate(vertices):
+            vertex.addData3f(v[0], v[1], v[2])
+            normal.addData3f(0, 0, 1)  # Simplified, should be calculated based on terrain
+            texcoord.addData2f(uv_coords[i][0], uv_coords[i][1])
+
+        # Create triangles
+        prim = GeomTriangles(Geom.UHStatic)
+        for i in range(0, len(indices), 3):
+            prim.addVertices(indices[i], indices[i+1], indices[i+2])
+        prim.closePrimitive()
+
+        geom = Geom(vdata)
+        geom.addPrimitive(prim)
+        node = GeomNode('terrain')
+        node.addGeom(geom)
+        terrainNP = NodePath(node)
+        terrainNP.reparentTo(self.render)
+
+        # Apply the texture
+        terrainNP.setTexture(terrainTexture)
+
+    def calculate_uv_coordinates(self, vertices, board_size):
+        # Simple UV mapping: map vertex position to UV coordinates
+        uv_coords = []
+        for v in vertices:
+            u = v[0] / board_size
+            v = v[1] / board_size
+            uv_coords.append((u, v))
+        return uv_coords
+
+
 
     def create_mesh_data(self, height_map, board_size, height_scale):
         # Assuming height_map is a 2D NumPy array
@@ -266,15 +305,13 @@ class GameEngine(ShowBase):
             normal.addData3f(0, 0, 1)  # Assume up vector for simplicity
             color.addData4f(0.5, 0.5, 0.5, 1)  # Greyscale
 
-        # Create triangles
+        # Define the primitive
         prim = GeomTriangles(Geom.UHStatic)
-
-        # Iterate through indices and add vertices to the primitive
+        
+        # Assuming indices is a flat list of vertex indices for triangles
         for i in range(0, len(indices), 3):
-            prim.addVertices(indices[i], indices[i+1], indices[i+2])
-            # Draw edges for each triangle
-            self.draw_mesh_edges(vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]])
-
+            prim.addVertices(indices[i], indices[i + 1], indices[i + 2])
+        
         prim.closePrimitive()
 
         geom = Geom(vdata)
@@ -442,7 +479,8 @@ class GameEngine(ShowBase):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--perlin', action='store_true')
+    parser.add_argument('--terrain', action='store', default="flat")
+    parser.add_argument('--texture', action='store', default="chess")
     args = parser.parse_args()
 
     game = GameEngine(args)

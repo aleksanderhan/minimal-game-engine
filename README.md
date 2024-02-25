@@ -16,8 +16,9 @@ Minimal game engine written python.
 
 ### How to run
 
-Run it like so in the terminal: `python game_engine.py` for a flat world experience.
-Run it with the perlin flag: `python game_engine.py --perlin` for a world generated with perlin noise
+* Run it like so in the terminal: `python game_engine.py` for a flat world experience.
+* Run it with the terrain flag: `python game_engine.py --terrain perlin` for a world generated with perlin noise, else `flat`
+* Run it with the texture flag: `python game_engine.py --texture grass` for a grass textured world, else `chess`
 
 ### Controls
 
