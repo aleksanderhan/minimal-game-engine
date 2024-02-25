@@ -26,6 +26,8 @@ from panda3d.core import Vec3, TransformState
 from math import cos, sin, radians
 from panda3d.core import Texture
 import random
+from helper import build_robot
+
 
 random.seed()
 
@@ -43,7 +45,7 @@ class GameEngine(ShowBase):
         self.setupBulletPhysics()
         self.setup_environment()
         self.setup_lighting()
-        #self.build_robot()
+        build_robot(self.physicsWorld)
 
         self.firstUpdate = True  # Add this line to initialize firstUpdate
 
@@ -61,60 +63,6 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
-
-    def build_robot(self):
-        # Create spherical body
-        body_shape = BulletSphereShape(1)
-        body_node = BulletRigidBodyNode('Body')
-        body_node.addShape(body_shape)
-        body_np = render.attachNewNode(body_node)
-        body_np.setPos(10, 10, 2)  # Position the body
-        self.physicsWorld.attachRigidBody(body_node)
-
-        # Add visual model for the body - using a sphere from Panda3D's basic models
-        sphere_model = loader.loadModel('models/misc/sphere')
-        sphere_model.reparentTo(body_np)
-        sphere_model.setScale(1)  # Match the BulletSphereShape's radius
-
-        # Function to create a visual representation of a leg segment
-        def create_leg_segment_visual(parent_np, scale=(0.1, 0.1, 1), pos=Vec3(0, 0, 0)):
-            card_maker = CardMaker('leg_segment')
-            card_maker.setFrame(-0.5, 0.5, -0.5, 0.5)  # Create a square
-            leg_segment_np = parent_np.attachNewNode(card_maker.generate())
-            leg_segment_np.setScale(scale)  # Scale to act as cylinder placeholder
-            leg_segment_np.setPos(pos)
-            return leg_segment_np
-
-        # Create legs with physics and visual placeholders
-        leg_length = 2
-        for i in range(4):  # Four legs
-            angle = i * (360 / 4)
-            offset = Vec3(1.5 * cos(radians(angle)), 1.5 * sin(radians(angle)), 0)
-
-            # Upper leg part
-            upper_leg_shape = BulletCylinderShape(0.1, leg_length / 2, 2)
-            upper_leg_node = BulletRigidBodyNode(f'UpperLeg{i}')
-            upper_leg_node.addShape(upper_leg_shape)
-            upper_leg_np = render.attachNewNode(upper_leg_node)
-            upper_leg_np.setPos(body_np.getPos() + offset)
-            self.physicsWorld.attachRigidBody(upper_leg_node)
-
-            # Add visual placeholder for the upper leg
-            create_leg_segment_visual(upper_leg_np, scale=(0.1, 0.1, leg_length / 2), pos=Vec3(0, 0, -leg_length / 4))
-
-            # Lower leg part
-            lower_leg_shape = BulletCylinderShape(0.1, leg_length / 2, 2)
-            lower_leg_node = BulletRigidBodyNode(f'LowerLeg{i}')
-            lower_leg_node.addShape(lower_leg_shape)
-            lower_leg_np = render.attachNewNode(lower_leg_node)
-            lower_leg_np.setPos(upper_leg_np.getPos() + Vec3(0, 0, -leg_length / 2))
-            self.physicsWorld.attachRigidBody(lower_leg_node)
-
-            # Add visual placeholder for the lower leg
-            create_leg_segment_visual(lower_leg_np, scale=(0.1, 0.1, leg_length / 2), pos=Vec3(0, 0, -leg_length / 4))
-
-            # Joints - no change needed here from your original code
-
 
 
     def setup_lighting(self):
