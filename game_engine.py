@@ -185,9 +185,6 @@ class GameEngine(ShowBase):
         else:
             self.apply_texture_to_terrain(board_size, vertices, indices, "assets/chess.png")
 
-        # Add mesh to Geom for visual representation
-        #self.add_mesh_to_geom(vertices, indices)
-
         # Add mesh to Bullet for physics simulation
         self.add_mesh_to_physics(vertices, indices)
 
@@ -263,36 +260,6 @@ class GameEngine(ShowBase):
                             for x in range(board_size - 1) for y in range(board_size - 1)]).flatten()
 
         return vertices, indices.astype(int)
-
-
-    def add_mesh_to_geom(self, vertices, indices):
-        format = GeomVertexFormat.getV3n3c4()
-        vdata = GeomVertexData('terrain', format, Geom.UHStatic)
-        vertex = GeomVertexWriter(vdata, 'vertex')
-        normal = GeomVertexWriter(vdata, 'normal')
-        color = GeomVertexWriter(vdata, 'color')
-
-        # Add vertices
-        for v in vertices:
-            vertex.addData3f(*v)
-            normal.addData3f(0, 0, 1)  # Assume up vector for simplicity
-            color.addData4f(0.5, 0.5, 0.5, 1)  # Greyscale
-
-        # Define the primitive
-        prim = GeomTriangles(Geom.UHStatic)
-        
-        # Assuming indices is a flat list of vertex indices for triangles
-        for i in range(0, len(indices), 3):
-            prim.addVertices(indices[i], indices[i + 1], indices[i + 2])
-        
-        prim.closePrimitive()
-
-        geom = Geom(vdata)
-        geom.addPrimitive(prim)
-        node = GeomNode('terrain')
-        node.addGeom(geom)
-        nodePath = NodePath(node)
-        nodePath.reparentTo(self.render)
 
 
 
