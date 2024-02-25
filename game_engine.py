@@ -45,7 +45,6 @@ class GameEngine(ShowBase):
         self.setupBulletPhysics()
         self.setup_environment()
         self.setup_lighting()
-        build_robot(self.physicsWorld)
 
         self.firstUpdate = True  # Add this line to initialize firstUpdate
 
@@ -165,6 +164,7 @@ class GameEngine(ShowBase):
         self.create_sphere((32, 32, 15))
         self.create_sphere((32, 32, 20))
         self.create_sphere((32, 32, 25))
+        build_robot(self.physicsWorld)
 
 
     def create_terrain_mesh(self):
