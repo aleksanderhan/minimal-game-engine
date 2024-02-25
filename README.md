@@ -9,6 +9,11 @@ Minimal game engine written python.
 * git - to checkout this repo
 * python 3.10 and pip - to run the program and install dependencies
 
+### Install
+
+* check out this repo
+* install dependencies: `pip install requirements.txt`
+
 ### How to run
 
 Run it like so in the terminal: `python game_engine.py` for a flat world experience.
