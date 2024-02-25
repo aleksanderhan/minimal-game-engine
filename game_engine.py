@@ -20,8 +20,10 @@ from panda3d.bullet import (
     BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
     BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape  # Conceptual
 )
+from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
 
 
+loadPrcFileData("", "load-file-type p3assimp")
 
 class GameEngine(ShowBase):
 
@@ -36,7 +38,6 @@ class GameEngine(ShowBase):
         self.setup_environment()
         self.setup_lighting()
 
-
         self.firstUpdate = True  # Add this line to initialize firstUpdate
 
         self.setup_movement_controls()
@@ -50,8 +51,11 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
         self.taskMgr.add(self.updatePhysics, "updatePhysics")
+        #self.taskMgr.add(self.follow_actor_task, "FollowActorTask")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
+
+
 
     def setup_lighting(self):
         # Ambient Light
@@ -119,11 +123,10 @@ class GameEngine(ShowBase):
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
         self.create_terrain_mesh()
-        self.create_sphere((16, 16, 10))
-        self.create_sphere((16, 16, 15))
-        self.create_sphere((16, 16, 20))
-        self.create_sphere((16, 16, 25))
-        self.create_sphere((16, 16, 30))
+        self.create_sphere((32, 32, 10))
+        self.create_sphere((32, 32, 15))
+        self.create_sphere((32, 32, 20))
+        self.create_sphere((32, 32, 25))
 
 
     def draw_mesh_edges(self, v0, v1, v2):
