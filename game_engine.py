@@ -1,54 +1,31 @@
-from direct.showbase.ShowBase import ShowBase
-from panda3d.core import CardMaker, Vec4, KeyboardButton, Vec3
-from panda3d.core import WindowProperties, Geom, GeomNode, NodePath
-from panda3d.core import GeomVertexFormat, GeomVertexData
-from panda3d.core import GeomVertexWriter, GeomTriangles, TextNode
-from direct.task import Task
-from direct.showbase.InputStateGlobal import inputState
-from direct.gui.OnscreenText import OnscreenText
 import numpy as np
-from panda3d.core import Geom, GeomVertexFormat, GeomVertexData
-from panda3d.core import GeomVertexWriter, GeomTriangles, GeomNode, NodePath
-from panda3d.core import loadPrcFileData
+import tkinter as tk
+import noise
+import pyautogui
+
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import Geom, GeomVertexData, GeomVertexFormat
-from panda3d.core import GeomVertexWriter, GeomTriangles, GeomNode, NodePath
-from panda3d.core import WindowProperties, KeyboardButton
-from panda3d.core import AmbientLight, DirectionalLight, Material, LColor
 from direct.task import Task
 from direct.showbase.InputStateGlobal import inputState
 from direct.gui.OnscreenText import OnscreenText
-from panda3d.bullet import BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape
-import tkinter as tk
 from direct.actor.Actor import Actor
-import noise
-from direct.showbase.ShowBase import ShowBase
+
 from panda3d.core import (
-    CardMaker, Vec3, KeyboardButton, WindowProperties, NodePath,
-    AmbientLight, DirectionalLight, LColor, TextNode
+    AmbientLight, CardMaker, DirectionalLight, Geom, GeomNode, GeomTriangles,
+    GeomVertexData, GeomVertexFormat, GeomVertexWriter, KeyboardButton, LColor,
+    LineSegs, Material, NodePath, TextNode, Vec3, Vec4, WindowProperties,
+    loadPrcFileData
 )
 from panda3d.bullet import (
-    BulletWorld, BulletRigidBodyNode, BulletSphereShape,
-    BulletHeightfieldShape  # This is conceptual
+    BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
+    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape  # Conceptual
 )
-from direct.task import Task
-from direct.showbase.InputStateGlobal import inputState
-from direct.gui.OnscreenText import OnscreenText
-import numpy as np
-import noise
-import tkinter as tk
-from panda3d.bullet import BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape, BulletTriangleMesh, BulletTriangleMeshShape
-from panda3d.core import Geom, GeomNode, GeomVertexData, GeomVertexFormat
-from panda3d.core import GeomVertexWriter, GeomTriangles, NodePath
-from panda3d.core import LineSegs
-import pyautogui
+
 
 
 class GameEngine(ShowBase):
     def __init__(self):
         super().__init__()
         self.disableMouse()
-        self.configure_window()
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
@@ -73,17 +50,6 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
 
- 
-
-    def configure_window(self):
-        # Configure window size and FPS settings
-        loadPrcFileData('', 'sync-video #f')
-        loadPrcFileData('', 'clock-mode limited')
-        loadPrcFileData('', 'clock-frame-rate 0')
-        root = tk.Tk()
-        width, height = root.winfo_screenwidth(), root.winfo_screenheight()
-        root.destroy()
-        loadPrcFileData('', f'win-size {width} {height}')
 
     def setupBulletPhysics(self):
         self.physicsWorld = BulletWorld()
