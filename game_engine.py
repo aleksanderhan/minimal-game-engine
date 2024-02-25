@@ -142,12 +142,12 @@ class GameEngine(ShowBase):
         groundNP.setPos(0, 0, -0.5)  # Adjust based on your scene
         self.physicsWorld.attachRigidBody(groundShape)
 
-        """
-        debugNode = BulletDebugNode('Debug')
-        debugNP = render.attachNewNode(debugNode)
-        debugNP.show()
-        self.physicsWorld.setDebugNode(debugNP.node())
-        """
+        if self.args.debug:
+            debugNode = BulletDebugNode('Debug')
+            debugNP = render.attachNewNode(debugNode)
+            debugNP.show()
+            self.physicsWorld.setDebugNode(debugNP.node())
+
 
     def updatePhysics(self, task):
         dt = globalClock.getDt()
@@ -506,6 +506,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--terrain', action='store', default="flat")
     parser.add_argument('--texture', action='store', default="chess")
+    parser.add_argument('--debug', action="store_true", default=False)
     args = parser.parse_args()
 
     game = GameEngine(args)
