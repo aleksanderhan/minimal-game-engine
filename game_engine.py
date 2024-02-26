@@ -33,11 +33,46 @@ random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
 
+
+class ChunkManager:
+    def __init__(self, game_engine):
+        self.game_engine = game_engine
+        self.loaded_chunks = {}
+
+    def get_player_chunk_pos(self):
+        player_pos = self.game_engine.camera.getPos()
+        chunk_x = int(player_pos.x) // self.game_engine.chunk_size
+        chunk_y = int(player_pos.y) // self.game_engine.chunk_size
+        return chunk_x, chunk_y
+
+    def update_chunks(self):
+        chunk_x, chunk_y = self.get_player_chunk_pos()
+        for x in range(chunk_x - 1, chunk_x + 2):
+            for y in range(chunk_y - 1, chunk_y + 2):
+                if (x, y) not in self.loaded_chunks:
+                    self.load_chunk(x, y)
+        # Identify chunks too far from the player to be unloaded
+        for chunk_pos in list(self.loaded_chunks.keys()):
+            if abs(chunk_pos[0] - chunk_x) > 2 or abs(chunk_pos[1] - chunk_y) > 2:
+                self.unload_chunk(*chunk_pos)
+
+    def load_chunk(self, chunk_x, chunk_y):
+        chunk = self.game_engine.generate_chunk(chunk_x, chunk_y)
+        self.loaded_chunks[(chunk_x, chunk_y)] = chunk
+
+    def unload_chunk(self, chunk_x, chunk_y):
+        chunk = self.loaded_chunks.pop((chunk_x, chunk_y), None)
+        if chunk:
+            chunk.removeNode()  # Assuming each chunk is a NodePath, adjust as needed for your implementation
+
+
 class GameEngine(ShowBase):
 
     def __init__(self, args):
         super().__init__()
         self.args = args
+        self.chunk_size = 64
+        self.chunk_manager = ChunkManager(self)
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
@@ -59,9 +94,41 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
         self.taskMgr.add(self.updatePhysics, "updatePhysics")
+        self.taskMgr.add(self.update, "update")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
+
+    def update(self, task):
+        self.chunk_manager.update_chunks()
+        return Task.cont
+
+
+    def generate_chunk(self, chunk_x, chunk_y):
+        # Generate the height map for this chunk
+        if self.args.terrain == "perlin":
+            height_map = self.generate_perlin_height_map(self.chunk_size, chunk_x, chunk_y)
+        else:
+            height_map = self.generate_flat_height_map(self.chunk_size)
+
+        # Generate mesh data from the height map
+        vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 5)  # Assume height scale is 5
+
+        # Apply texture based on args
+        texture_path = "assets/grass.png" if self.args.texture == "grass" else "assets/chess.png"
+        # Create terrain geometry and apply texture
+        terrainNP = self.apply_texture_to_terrain(self.chunk_size, vertices, indices, texture_path)
+        terrainNP.reparentTo(self.render)
+
+        # Position the terrain chunk according to its world coordinates
+        world_x = chunk_x * self.chunk_size
+        world_y = chunk_y * self.chunk_size
+        terrainNP.setPos(world_x, world_y, 0)
+
+        # Add physics
+        self.add_mesh_to_physics(vertices, indices, world_x, world_y)
+
+        return terrainNP
 
 
     def setup_lighting(self):
@@ -83,11 +150,6 @@ class GameEngine(ShowBase):
     def setupBulletPhysics(self):
         self.physicsWorld = BulletWorld()
         self.physicsWorld.setGravity(Vec3(0, 0, -9.81))
-        # Placeholder for terrain physics, assuming flat ground for simplicity
-        groundShape = BulletRigidBodyNode('Ground')
-        groundNP = self.render.attachNewNode(groundShape)
-        groundNP.setPos(0, 0, -0.5)  # Adjust based on your scene
-        self.physicsWorld.attachRigidBody(groundShape)
 
         if self.args.debug:
             debugNode = BulletDebugNode('Debug')
@@ -159,34 +221,12 @@ class GameEngine(ShowBase):
     
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
-        self.create_terrain_mesh()
         self.create_sphere((32, 32, 10))
         self.create_sphere((32, 32, 15))
         self.create_sphere((32, 32, 20))
         self.create_sphere((32, 32, 25))
         build_robot(self.physicsWorld)
 
-
-    def create_terrain_mesh(self):
-        board_size = 64
-        height_scale = 3
-
-        # Generate the height map
-        if self.args.terrain == "perlin":
-            height_map = self.generate_perlin_height_map(board_size)
-        else:
-            height_map = self.generate_flat_height_map(board_size)
-
-        # Generate mesh data
-        vertices, indices = self.create_mesh_data(height_map, board_size, height_scale)
-
-        if self.args.texture == "grass":
-            self.apply_texture_to_terrain(board_size, vertices, indices, "assets/grass.png")
-        else:
-            self.apply_texture_to_terrain(board_size, vertices, indices, "assets/chess.png")
-
-        # Add mesh to Bullet for physics simulation
-        self.add_mesh_to_physics(vertices, indices)
 
     def apply_texture_to_terrain(self, board_size, vertices, indices, texture_path):
         # Load the texture
@@ -232,6 +272,7 @@ class GameEngine(ShowBase):
 
         # Apply the texture
         terrainNP.setTexture(terrainTexture)
+        return terrainNP
 
     def calculate_uv_coordinates(self, vertices, board_size):
         # Simple UV mapping: map vertex position to UV coordinates
@@ -263,7 +304,7 @@ class GameEngine(ShowBase):
 
 
 
-    def add_mesh_to_physics(self, vertices, indices):
+    def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
         for i in range(0, len(indices), 3):
             v0, v1, v2 = vertices[indices[i]], vertices[indices[i+1]], vertices[indices[i+2]]
@@ -273,29 +314,37 @@ class GameEngine(ShowBase):
         terrainNode = BulletRigidBodyNode('Terrain')
         terrainNode.addShape(terrainShape)
         terrainNP = self.render.attachNewNode(terrainNode)
+        # Set the position of the terrain's physics node to match its visual representation
+        terrainNP.setPos(world_x, world_y, 0)
         self.physicsWorld.attachRigidBody(terrainNode)
 
 
-    def generate_perlin_height_map(self, board_size):
-        """Generate a height map using Perlin noise."""
+
+    def generate_perlin_height_map(self, board_size, chunk_x, chunk_y):
         scale = 0.1
         octaves = 3
         persistence = 1.0
-        lacunarity = 0.5
+        lacunarity = 2.0
         base = 0
         height_map = np.zeros((board_size, board_size))
-        
+
+        world_x = chunk_x * board_size
+        world_y = chunk_y * board_size
+
         for x in range(board_size):
             for y in range(board_size):
-                height_map[x][y] = noise.pnoise2(x * scale,
-                                                 y * scale,
-                                                 octaves=octaves,
-                                                 persistence=persistence,
-                                                 lacunarity=lacunarity,
-                                                 repeatx=board_size,
-                                                 repeaty=board_size,
-                                                 base=base) * 5  # Scale height
+                world_pos_x = world_x + x
+                world_pos_y = world_y + y
+                height_map[x][y] = noise.pnoise2(world_pos_x * scale,
+                                                world_pos_y * scale,
+                                                octaves=octaves,
+                                                persistence=persistence,
+                                                lacunarity=lacunarity,
+                                                repeatx=1024,
+                                                repeaty=1024,
+                                                base=base) * 5  # Adjust the height scale as needed
         return height_map
+
     
     def generate_flat_height_map(self, board_size, height=0):
         """Generate a completely flat height map."""
