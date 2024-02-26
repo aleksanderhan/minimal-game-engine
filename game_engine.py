@@ -57,13 +57,20 @@ class ChunkManager:
                 self.unload_chunk(*chunk_pos)
 
     def load_chunk(self, chunk_x, chunk_y):
-        chunk = self.game_engine.generate_chunk(chunk_x, chunk_y)
-        self.loaded_chunks[(chunk_x, chunk_y)] = chunk
+        # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
+        terrainNP, terrainNode = self.game_engine.generate_chunk(chunk_x, chunk_y)
+        
+        # Store both components in the loaded_chunks dictionary
+        self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode)
 
     def unload_chunk(self, chunk_x, chunk_y):
-        chunk = self.loaded_chunks.pop((chunk_x, chunk_y), None)
-        if chunk:
-            chunk.removeNode()  # Assuming each chunk is a NodePath, adjust as needed for your implementation
+        chunk_data = self.loaded_chunks.pop((chunk_x, chunk_y), None)
+        if chunk_data:
+            terrainNP, terrainNode = chunk_data
+            # Remove the visual component from the scene
+            terrainNP.removeNode()
+            # Remove the physics component from the physics world
+            self.game_engine.physicsWorld.removeRigidBody(terrainNode)
 
 
 class GameEngine(ShowBase):
@@ -126,9 +133,9 @@ class GameEngine(ShowBase):
         terrainNP.setPos(world_x, world_y, 0)
 
         # Add physics
-        self.add_mesh_to_physics(vertices, indices, world_x, world_y)
+        terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)
 
-        return terrainNP
+        return terrainNP, terrainNode
 
 
     def setup_lighting(self):
@@ -317,6 +324,7 @@ class GameEngine(ShowBase):
         # Set the position of the terrain's physics node to match its visual representation
         terrainNP.setPos(world_x, world_y, 0)
         self.physicsWorld.attachRigidBody(terrainNode)
+        return terrainNode
 
 
 
