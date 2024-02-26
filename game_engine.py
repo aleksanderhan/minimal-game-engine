@@ -29,7 +29,7 @@ import random
 from helper import build_robot
 
 
-random.seed()
+#random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
 
@@ -114,7 +114,7 @@ class GameEngine(ShowBase):
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
         if self.args.terrain == "perlin":
-            height_map = self.generate_perlin_height_map(self.chunk_size, chunk_x, chunk_y)
+            height_map = self.generate_perlin_height_map(chunk_x, chunk_y)
         else:
             height_map = self.generate_flat_height_map(self.chunk_size)
 
@@ -128,8 +128,8 @@ class GameEngine(ShowBase):
         terrainNP.reparentTo(self.render)
 
         # Position the terrain chunk according to its world coordinates
-        world_x = chunk_x * self.chunk_size
-        world_y = chunk_y * self.chunk_size
+        world_x = chunk_x * (self.chunk_size - 1)  # Adjusted to account for overlap
+        world_y = chunk_y * (self.chunk_size - 1)  # Adjusted to account for overlap
         terrainNP.setPos(world_x, world_y, 0)
 
         # Add physics
@@ -293,21 +293,30 @@ class GameEngine(ShowBase):
 
 
     def create_mesh_data(self, height_map, board_size, height_scale):
-        # Assuming height_map is a 2D NumPy array
-        x, y = np.meshgrid(np.arange(board_size), np.arange(board_size), indexing='ij')
+        # Adjust the size for seamless edges
+        adjusted_size = board_size + 1  # Adjust for the extra row/column
+
+        # Generate meshgrid with the adjusted size
+        x, y = np.meshgrid(np.arange(adjusted_size), np.arange(adjusted_size), indexing='ij')
+
+        # Ensure z has the correct shape, assuming height_map is already (board_size + 1, board_size + 1)
         z = height_map * height_scale
+
+        # Now x, y, and z have matching shapes, and you can safely stack them
         vertices = np.stack([x, y, z], axis=-1).reshape(-1, 3).astype(np.float32)
 
-        # Efficiently compute indices for a grid mesh
-        indices = np.array([[y * board_size + x,
-                            (y + 1) * board_size + x,
-                            y * board_size + (x + 1),
-                            y * board_size + (x + 1),
-                            (y + 1) * board_size + x,
-                            (y + 1) * board_size + (x + 1)]
-                            for x in range(board_size - 1) for y in range(board_size - 1)]).flatten()
+        # Adjust index calculation for the extra vertices
+        indices = []
+        for iy in range(board_size):
+            for ix in range(board_size):
+                # Calculate indices for two triangles covering the quad
+                indices += [
+                    iy * adjusted_size + ix, (iy + 1) * adjusted_size + ix, iy * adjusted_size + (ix + 1),
+                    iy * adjusted_size + (ix + 1), (iy + 1) * adjusted_size + ix, (iy + 1) * adjusted_size + (ix + 1)
+                ]
 
-        return vertices, indices.astype(int)
+        return vertices, np.array(indices, dtype=np.int32)
+
 
 
 
@@ -328,31 +337,37 @@ class GameEngine(ShowBase):
 
 
 
-    def generate_perlin_height_map(self, board_size, chunk_x, chunk_y):
-        scale = 0.1
-        octaves = 3
-        persistence = 0.5
-        lacunarity = 1.0
-        base = 0
-        height_map = np.zeros((board_size, board_size))
+    def generate_perlin_height_map(self, chunk_x, chunk_y):
+        scale = 0.1  # Adjust scale to control the "zoom" level of the noise
+        octaves = 4  # Number of layers of noise to combine
+        persistence = 0.5  # Amplitude of each octave
+        lacunarity = 2.0  # Frequency of each octave
 
-        world_x = chunk_x * board_size
-        world_y = chunk_y * board_size
+        height_map = np.zeros((self.chunk_size + 1, self.chunk_size + 1))
 
-        for x in range(board_size):
-            for y in range(board_size):
-                world_pos_x = world_x + x
-                world_pos_y = world_y + y
-                height_map[x][y] = noise.pnoise2(world_pos_x * scale,
-                                                world_pos_y * scale,
-                                                octaves=octaves,
-                                                persistence=persistence,
-                                                lacunarity=lacunarity,
-                                                repeatx=1024,
-                                                repeaty=1024,
-                                                base=base) * 2  # Adjust the height scale as needed
+        # Calculate global offsets
+        global_offset_x = chunk_x * self.chunk_size
+        global_offset_y = chunk_y * self.chunk_size
+
+        for x in range(self.chunk_size + 1):
+            for y in range(self.chunk_size + 1):
+                # Calculate global coordinates
+                global_x = (global_offset_x + x) * scale
+                global_y = (global_offset_y + y) * scale
+
+                # Generate height using Perlin noise
+                height = noise.pnoise2(global_x, global_y,
+                                    octaves=octaves,
+                                    persistence=persistence,
+                                    lacunarity=lacunarity,
+                                    repeatx=10000,  # Large repeat region to avoid repetition
+                                    repeaty=10000,
+                                    base=0)  # Base can be any constant, adjust for different terrains
+
+                # Map the noise value to a desired height range if needed
+                height_map[x, y] = height
+
         return height_map
-
     
     def generate_flat_height_map(self, board_size, height=0):
         """Generate a completely flat height map."""
