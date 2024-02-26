@@ -1,4 +1,4 @@
-pandas3d
+panda3d
 pybullet
 pyautogui
 noise
