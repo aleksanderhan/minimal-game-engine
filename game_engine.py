@@ -47,13 +47,14 @@ class ChunkManager:
 
     def update_chunks(self):
         chunk_x, chunk_y = self.get_player_chunk_pos()
-        for x in range(chunk_x - 1, chunk_x + 2):
-            for y in range(chunk_y - 1, chunk_y + 2):
+        # Adjust the range to load chunks further out by one additional level
+        for x in range(chunk_x - 3, chunk_x + 3):  # Increase the range by one on each side
+            for y in range(chunk_y - 3, chunk_y + 3):  # Increase the range by one on each side
                 if (x, y) not in self.loaded_chunks:
                     self.load_chunk(x, y)
-        # Identify chunks too far from the player to be unloaded
+        # Adjust the identification of chunks to unload, if necessary
         for chunk_pos in list(self.loaded_chunks.keys()):
-            if abs(chunk_pos[0] - chunk_x) > 2 or abs(chunk_pos[1] - chunk_y) > 2:
+            if abs(chunk_pos[0] - chunk_x) > 3 or abs(chunk_pos[1] - chunk_y) > 3:  # Adjusted range
                 self.unload_chunk(*chunk_pos)
 
     def load_chunk(self, chunk_x, chunk_y):
@@ -78,7 +79,7 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.chunk_size = 64
+        self.chunk_size = 32
         self.chunk_manager = ChunkManager(self)
 
         self.camera.setPos(0, -30, 30)
@@ -370,10 +371,12 @@ class GameEngine(ShowBase):
         return height_map
     
     def generate_flat_height_map(self, board_size, height=0):
-        """Generate a completely flat height map."""
+        # Adjust board_size to account for the extra row and column for seamless edges
+        adjusted_size = board_size + 1
         # Create a 2D NumPy array filled with the specified height value
-        height_map = np.full((board_size, board_size), height)
+        height_map = np.full((adjusted_size, adjusted_size), height)
         return height_map
+
 
     
     def create_sphere(self, position):

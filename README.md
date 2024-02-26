@@ -30,3 +30,5 @@ Use the keys a,s,d,w to steer the position of the camera and use the mouse to st
 ![Semi-autogpt example](docs/demo2.gif)
 
 ![Semi-autogpt example](docs/demo3.gif)
+
+![Semi-autogpt example](docs/demo4.gif)
