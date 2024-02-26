@@ -128,8 +128,8 @@ class GameEngine(ShowBase):
         terrainNP.reparentTo(self.render)
 
         # Position the terrain chunk according to its world coordinates
-        world_x = chunk_x * (self.chunk_size - 1)  # Adjusted to account for overlap
-        world_y = chunk_y * (self.chunk_size - 1)  # Adjusted to account for overlap
+        world_x = chunk_x * self.chunk_size
+        world_y = chunk_y * self.chunk_size
         terrainNP.setPos(world_x, world_y, 0)
 
         # Add physics
