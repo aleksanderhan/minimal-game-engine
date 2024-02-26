@@ -12,7 +12,7 @@ Minimal game engine written in python.
 ### Install
 
 * clone this repo
-* install dependencies: `pip install requirements.txt`
+* install dependencies: `pip install -r requirements.txt`
 
 ### How to run
 
