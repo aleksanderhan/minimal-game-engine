@@ -331,8 +331,8 @@ class GameEngine(ShowBase):
     def generate_perlin_height_map(self, board_size, chunk_x, chunk_y):
         scale = 0.1
         octaves = 3
-        persistence = 1.0
-        lacunarity = 2.0
+        persistence = 0.5
+        lacunarity = 1.0
         base = 0
         height_map = np.zeros((board_size, board_size))
 
@@ -350,7 +350,7 @@ class GameEngine(ShowBase):
                                                 lacunarity=lacunarity,
                                                 repeatx=1024,
                                                 repeaty=1024,
-                                                base=base) * 5  # Adjust the height scale as needed
+                                                base=base) * 2  # Adjust the height scale as needed
         return height_map
 
     
