@@ -17,18 +17,22 @@ Minimal game engine written in python.
 ### How to run
 
 * Run it like so in the terminal: `python game_engine.py` for a flat world experience.
-* Run it with the terrain flag: `python game_engine.py --terrain perlin` for a world generated with perlin noise, else `flat`
-* Run it with the texture flag: `python game_engine.py --texture grass` for a grass textured world, else `chess`
+* Run it with the terrain flag: `python game_engine.py --terrain=perlin` for a world generated with perlin noise, else `flat`
+* Run it with the texture flag: `python game_engine.py --texture=grass` for a grass textured world, else `chess`
 
 ### Controls
 
-Use the keys a,s,d,w to steer the position of the camera and use the mouse to steer the angle of the camera. Use left mouse click to shot.
+Use the keys a,s,d,w to steer the position of the camera and use the mouse to steer the angle of the camera. Use left and right mouse click to shot.
 
 ## Demo
+### Collision physics:
 ![Semi-autogpt example](docs/demo.gif)
 
+### Gravity:
 ![Semi-autogpt example](docs/demo2.gif)
 
+### Many-body physics:
 ![Semi-autogpt example](docs/demo3.gif)
 
+### Procedural generated terrain:
 ![Semi-autogpt example](docs/demo4.gif)

@@ -27,7 +27,10 @@ from math import cos, sin, radians
 from panda3d.core import Texture
 import random
 from helper import build_robot
-
+from panda3d.bullet import BulletBoxShape
+from panda3d.bullet import BulletGenericConstraint
+from direct.gui.OnscreenImage import OnscreenImage
+from panda3d.core import TransparencyAttrib
 
 #random.seed()
 
@@ -79,8 +82,12 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.chunk_size = 32
+
+        self.ground_level = 0 
+        self.chunk_size = 64
+        
         self.chunk_manager = ChunkManager(self)
+        self.voxel_positions = set()
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
@@ -88,6 +95,7 @@ class GameEngine(ShowBase):
         self.setupBulletPhysics()
         self.setup_environment()
         self.setup_lighting()
+        self.setup_crosshair()
 
         self.firstUpdate = True  # Add this line to initialize firstUpdate
 
@@ -106,7 +114,66 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
+        self.accept('f', self.create_and_place_voxel)
 
+    def setup_crosshair(self):
+        # Path to the crosshair image
+        crosshair_image = 'assets/crosshair.png'
+        
+        # Create and position the crosshair at the center of the screen
+        self.crosshair = OnscreenImage(image=crosshair_image, pos=(0, 0, 0))
+        self.crosshair.setTransparency(TransparencyAttrib.MAlpha)
+        self.crosshair.setScale(0.05, 1, 0.05)
+
+    def create_and_place_voxel(self):
+        # Adjust the multiplier to set the voxel 1 game meter away from the camera
+        position = self.camera.getPos() + self.camera.getQuat().getForward() * 1  # Set distance to 1 game meter
+        # Round the position to snap to grid
+        grid_position = Vec3(round(position.x), round(position.y), round(position.z))
+
+        # Check if a voxel already exists at this position
+        if not self.voxel_exists_at(grid_position):
+            self.create_voxel(grid_position, scale=0.2)
+            self.voxel_positions.add((grid_position.x, grid_position.y, grid_position.z))
+        else:
+            # Optional: Handle the case where a voxel already exists at the intended position
+            pass
+
+    def voxel_exists_at(self, position):
+        # Convert Vec3 position to a tuple for set comparison
+        return (position.x, position.y, position.z) in self.voxel_positions
+
+    def find_nearest_voxel_position(self, position):
+        # This is a simplified version. You might need to check for actual nearest positions
+        # based on your game's logic, e.g., checking adjacent positions for existing voxels.
+        adjustments = [Vec3(1, 0, 0), Vec3(-1, 0, 0), Vec3(0, 1, 0), Vec3(0, -1, 0), Vec3(0, 0, 1), Vec3(0, 0, -1)]
+        for adj in adjustments:
+            adj_position = position + adj
+            if self.voxel_exists_at(adj_position):
+                return adj_position
+        return None
+
+
+
+    def create_voxel(self, position, scale=0.2):
+        voxel_shape = BulletBoxShape(Vec3(scale / 2, scale / 2, scale / 2))
+        voxel_node = BulletRigidBodyNode('Voxel')
+        voxel_node.addShape(voxel_shape)
+        # Check if the voxel is placed on the ground
+        if position.z == self.ground_level:  # Assuming you have a defined ground_level variable
+            voxel_node.setMass(0)  # Make the voxel static if it's on the ground
+        else:
+            voxel_node.setMass(1.0)  # Otherwise, it's dynamic
+        voxel_np = self.render.attachNewNode(voxel_node)
+        voxel_np.setPos(position)
+        self.physicsWorld.attachRigidBody(voxel_node)
+        voxel_model = self.loader.loadModel("models/box.egg")
+        voxel_model.setScale(scale)
+        voxel_model.reparentTo(voxel_np)
+        voxel_model.setColor(0.5, 0.5, 0.5, 1)
+        return voxel_node
+
+    
     def update(self, task):
         self.chunk_manager.update_chunks()
         return Task.cont
@@ -169,6 +236,7 @@ class GameEngine(ShowBase):
     def updatePhysics(self, task):
         dt = globalClock.getDt()
         self.physicsWorld.doPhysics(dt)
+        
         return Task.cont
     
     def shoot_bullet(self):
@@ -233,7 +301,7 @@ class GameEngine(ShowBase):
         self.create_sphere((32, 32, 15))
         self.create_sphere((32, 32, 20))
         self.create_sphere((32, 32, 25))
-        build_robot(self.physicsWorld)
+        #build_robot(self.physicsWorld)
 
 
     def apply_texture_to_terrain(self, board_size, vertices, indices, texture_path):
@@ -318,9 +386,6 @@ class GameEngine(ShowBase):
 
         return vertices, np.array(indices, dtype=np.int32)
 
-
-
-
     def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
         for i in range(0, len(indices), 3):
@@ -335,8 +400,6 @@ class GameEngine(ShowBase):
         terrainNP.setPos(world_x, world_y, 0)
         self.physicsWorld.attachRigidBody(terrainNode)
         return terrainNode
-
-
 
     def generate_perlin_height_map(self, chunk_x, chunk_y):
         scale = 0.1  # Adjust scale to control the "zoom" level of the noise
@@ -376,8 +439,6 @@ class GameEngine(ShowBase):
         # Create a 2D NumPy array filled with the specified height value
         height_map = np.full((adjusted_size, adjusted_size), height)
         return height_map
-
-
     
     def create_sphere(self, position):
         # Sphere physics
@@ -404,7 +465,6 @@ class GameEngine(ShowBase):
         self.lastMouseY = 0
         self.cameraPitch = 0
         self.cameraHeading = 0
-
     
     def mouse_task(self, task):
         if self.mouseWatcherNode.hasMouse():

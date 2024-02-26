@@ -27,13 +27,13 @@ from panda3d.core import TransformState, Vec3
 
 
 
-def build_robot(physicsWorld):
+def build_robot(physicsWorld, position=(10, 10, 10)):
     # Create spherical body
     body_shape = BulletSphereShape(1)
     body_node = BulletRigidBodyNode('Body')
     body_node.addShape(body_shape)
     body_np = render.attachNewNode(body_node)
-    body_np.setPos(10, 10, 2)  # Position the body
+    body_np.setPos(*position)  # Position the body
     physicsWorld.attachRigidBody(body_node)
 
     # Add visual model for the body - using a sphere from Panda3D's basic models
