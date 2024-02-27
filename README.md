@@ -23,6 +23,7 @@ Minimal game engine written in python.
 ### Controls
 
 Use the keys a,s,d,w to steer the position of the camera and use the mouse to steer the angle of the camera. Use left and right mouse click to shot.
+Use `f` key to place blocks.
 
 ## Demo
 ### Collision physics:

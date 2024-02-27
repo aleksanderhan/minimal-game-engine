@@ -32,11 +32,14 @@ from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
 from functools import lru_cache 
+from panda3d.core import WindowProperties
 
 
 random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
+
+
 
 
 class ChunkManager:
@@ -550,4 +553,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     game = GameEngine(args)
+    # Create a WindowProperties object
+    props = WindowProperties()
+    # Set the cursor visibility to False
+    props.setCursorHidden(True)
+    # Apply the properties to the main window
+    game.win.requestProperties(props)
     game.run()
