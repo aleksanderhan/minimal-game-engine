@@ -31,8 +31,10 @@ from panda3d.bullet import BulletBoxShape
 from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
+from functools import lru_cache 
 
-#random.seed()
+
+random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
 
@@ -48,16 +50,16 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self):
+    def update_chunks(self, levels=3):
         chunk_x, chunk_y = self.get_player_chunk_pos()
         # Adjust the range to load chunks further out by one additional level
-        for x in range(chunk_x - 3, chunk_x + 3):  # Increase the range by one on each side
-            for y in range(chunk_y - 3, chunk_y + 3):  # Increase the range by one on each side
+        for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
+            for y in range(chunk_y - levels, chunk_y + levels):  # Increase the range by one on each side
                 if (x, y) not in self.loaded_chunks:
                     self.load_chunk(x, y)
         # Adjust the identification of chunks to unload, if necessary
         for chunk_pos in list(self.loaded_chunks.keys()):
-            if abs(chunk_pos[0] - chunk_x) > 3 or abs(chunk_pos[1] - chunk_y) > 3:  # Adjusted range
+            if abs(chunk_pos[0] - chunk_x) > 3 or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
                 self.unload_chunk(*chunk_pos)
 
     def load_chunk(self, chunk_x, chunk_y):
@@ -83,11 +85,11 @@ class GameEngine(ShowBase):
         super().__init__()
         self.args = args
 
-        self.chunk_size = 48
+        self.chunk_size = 24
         self.chunk_manager = ChunkManager(self)
 
-        self.camera.setPos(0, -30, 30)
-        self.camera.lookAt(0, 0, 0)
+        self.camera.setPos(0, 0, 10)
+        self.camera.lookAt(5, 5, 0)
 
         self.setup_physics()
         self.setup_environment()
@@ -105,14 +107,96 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
+        self.accept('f', self.create_and_place_voxel)
 
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
-        self.create_sphere((32, 32, 10))
-        self.create_sphere((32, 32, 15))
-        self.create_sphere((32, 32, 20))
-        self.create_sphere((32, 32, 25))
+        self.create_sphere((5, 5, 10))
+        self.create_sphere((5, 5, 15))
+        self.create_sphere((5, 5, 20))
+        self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
+
+    def get_face_center_from_hit(self, raycast_result, voxel_size=1):
+        hit_normal = raycast_result.getHitNormal()
+        node_path = raycast_result.getNode().getPythonTag("nodePath")  # Assuming the tag has been set correctly
+        voxel_position = node_path.getPos()  # World position of the voxel's center
+
+        # Calculate face center based on the hit normal
+        if abs(hit_normal.x) > 0.5:  # Hit on X-face
+            face_center = voxel_position + Vec3(hit_normal.x * voxel_size / 2, 0, 0)
+        elif abs(hit_normal.y) > 0.5:  # Hit on Y-face
+            face_center = voxel_position + Vec3(0, hit_normal.y * voxel_size / 2, 0)
+        else:  # Hit on Z-face
+            face_center = voxel_position + Vec3(0, 0, hit_normal.z * voxel_size / 2)
+
+        return face_center
+
+
+
+
+    def create_and_place_voxel(self):
+        raycast_result = self.cast_ray_from_camera()
+
+        if raycast_result.hasHit():
+            # place voxel on ground or attatch to face of other voxel
+            hit_node = raycast_result.getNode()
+            hit_pos = raycast_result.getHitPos()
+            hit_normal = raycast_result.getHitNormal()
+            print(hit_node.name)
+            print(hit_pos)
+            print(hit_normal)
+
+            scale = 1
+            if hit_node.name == "Terrain":
+                self.create_voxel(hit_pos, static=True)
+            elif hit_node.name == "Voxel":
+                face_center = self.get_face_center_from_hit(raycast_result)
+                print("face_center", face_center)
+                self.create_voxel(face_center + hit_normal * (scale/2), static=True)
+        else:
+            # place voxel in mid air
+            forward_vec = self.camera.getQuat().getForward()
+            # Calculate the exact position 10 meter in front of the camera
+            position = self.camera.getPos() + forward_vec * 10
+            self.create_voxel(position)
+
+    def create_voxel(self, position, scale=1, static=False):
+        voxel_shape = BulletBoxShape(Vec3(scale / 2, scale / 2, scale / 2))
+        voxel_node = BulletRigidBodyNode('Voxel')
+        node_path = render.attachNewNode(voxel_node)
+        node_path.setPythonTag("nodePath", node_path)
+        voxel_node.addShape(voxel_shape)
+        # Check if the voxel is placed on the ground
+        if static:
+            voxel_node.setMass(0)  # Make the voxel static if it's on the ground
+        else:
+            voxel_node.setMass(1.0)  # Otherwise, it's dynamic
+
+        voxel_np = self.render.attachNewNode(voxel_node)
+        voxel_np.setPos(position)
+        self.physicsWorld.attachRigidBody(voxel_node)
+        
+        voxel_model = self.loader.loadModel("models/box.egg")
+        voxel_model.setScale(scale)
+        voxel_model.reparentTo(voxel_np)
+        voxel_model.setColor(0.5, 0.5, 0.5, 1)
+        voxel_model.setPos(-scale / 2, -scale / 2, -scale / 2)
+
+        return voxel_node
+
+    def cast_ray_from_camera(self, distance=10):
+        """Casts a ray from the camera to detect voxels."""
+        # Get the camera's position and direction
+        cam_pos = self.camera.getPos()
+        cam_dir = self.camera.getQuat().getForward()
+        
+        # Define the ray's start and end points (within a certain distance)
+        start_point = cam_pos
+        end_point = cam_pos + cam_dir * distance  # Adjust the distance as needed
+        
+        # Perform the raycast
+        return self.physicsWorld.rayTestClosest(start_point, end_point)
 
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
@@ -122,7 +206,7 @@ class GameEngine(ShowBase):
             height_map = self.generate_flat_height_map(self.chunk_size)
 
         # Generate mesh data from the height map
-        vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 5)  # Assume height scale is 5
+        vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 7)
 
         # Apply texture based on args
         texture_path = "assets/grass.png" if self.args.texture == "grass" else "assets/chess.png"
@@ -165,19 +249,19 @@ class GameEngine(ShowBase):
             debugNP.show()
             self.physicsWorld.setDebugNode(debugNP.node())
     
-    def shoot_bullet(self, speed=100, scale=0.2, mass=0.1):
+    def shoot_bullet(self, speed=100, scale=0.2, mass=0.1, color=(1, 1, 1, 1)):
         # Use the camera's position and orientation to shoot the bullet
         position = self.camera.getPos()
         direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
         velocity = direction * speed  # Adjust the speed as necessary
         
         # Create and shoot the bullet
-        self.create_bullet(position, velocity, scale, mass)
+        self.create_bullet(position, velocity, scale, mass, color)
 
     def shoot_big_bullet(self):
-        return self.shoot_bullet(30, 1, 10)
+        return self.shoot_bullet(30, 1, 10, (1, 0, 0, 1))
 
-    def create_bullet(self, position, velocity, scale, mass):
+    def create_bullet(self, position, velocity, scale, mass, color):
         # Bullet model
         bullet_model = self.loader.loadModel("models/misc/sphere.egg")  # Use a simple sphere model
         bullet_node = BulletRigidBodyNode('Bullet')
@@ -186,7 +270,7 @@ class GameEngine(ShowBase):
         bullet_model.setScale(scale)  # Scale down to bullet size
         bullet_shape = BulletSphereShape(scale)  # The collision shape radius
         bullet_node.setMass(mass) 
-        bullet_model.setColor(1, 0, 0, 1)
+        bullet_model.setColor(*color)
         
         bullet_node.addShape(bullet_shape)
         bullet_node.setLinearVelocity(velocity)  # Set initial velocity
@@ -310,10 +394,11 @@ class GameEngine(ShowBase):
         self.physicsWorld.attachRigidBody(terrainNode)
         return terrainNode
 
+    @lru_cache
     def generate_perlin_height_map(self, chunk_x, chunk_y):
-        scale = 0.1  # Adjust scale to control the "zoom" level of the noise
+        scale = 0.02  # Adjust scale to control the "zoom" level of the noise
         octaves = 4  # Number of layers of noise to combine
-        persistence = 0.5  # Amplitude of each octave
+        persistence = 1.5  # Amplitude of each octave
         lacunarity = 2.0  # Frequency of each octave
 
         height_map = np.zeros((self.chunk_size + 1, self.chunk_size + 1))
@@ -435,7 +520,7 @@ class GameEngine(ShowBase):
         dt = globalClock.getDt()
         speed = 20  # Existing movement speed
         lift_speed = 10  # Existing up and down speed
-        rotate_speed = 50  # Speed for rotating the camera, adjust as needed
+        rotate_speed = 70  # Speed for rotating the camera, adjust as needed
 
         # Lateral movement
         if inputState.isSet('forward'):
