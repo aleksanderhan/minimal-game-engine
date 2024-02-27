@@ -48,16 +48,16 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self):
+    def update_chunks(self, levels=3):
         chunk_x, chunk_y = self.get_player_chunk_pos()
         # Adjust the range to load chunks further out by one additional level
-        for x in range(chunk_x - 3, chunk_x + 3):  # Increase the range by one on each side
-            for y in range(chunk_y - 3, chunk_y + 3):  # Increase the range by one on each side
+        for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
+            for y in range(chunk_y - levels, chunk_y + levels):  # Increase the range by one on each side
                 if (x, y) not in self.loaded_chunks:
                     self.load_chunk(x, y)
         # Adjust the identification of chunks to unload, if necessary
         for chunk_pos in list(self.loaded_chunks.keys()):
-            if abs(chunk_pos[0] - chunk_x) > 3 or abs(chunk_pos[1] - chunk_y) > 3:  # Adjusted range
+            if abs(chunk_pos[0] - chunk_x) > 3 or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
                 self.unload_chunk(*chunk_pos)
 
     def load_chunk(self, chunk_x, chunk_y):
@@ -83,10 +83,10 @@ class GameEngine(ShowBase):
         super().__init__()
         self.args = args
 
-        self.chunk_size = 48
+        self.chunk_size = 24
         self.chunk_manager = ChunkManager(self)
 
-        self.camera.setPos(0, -30, 30)
+        self.camera.setPos(0, 0, 5)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
@@ -108,10 +108,10 @@ class GameEngine(ShowBase):
 
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
-        self.create_sphere((32, 32, 10))
-        self.create_sphere((32, 32, 15))
-        self.create_sphere((32, 32, 20))
-        self.create_sphere((32, 32, 25))
+        self.create_sphere((5, 5, 10))
+        self.create_sphere((5, 5, 15))
+        self.create_sphere((5, 5, 20))
+        self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
 
     def generate_chunk(self, chunk_x, chunk_y):
@@ -122,7 +122,7 @@ class GameEngine(ShowBase):
             height_map = self.generate_flat_height_map(self.chunk_size)
 
         # Generate mesh data from the height map
-        vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 5)  # Assume height scale is 5
+        vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 7)
 
         # Apply texture based on args
         texture_path = "assets/grass.png" if self.args.texture == "grass" else "assets/chess.png"
@@ -165,19 +165,19 @@ class GameEngine(ShowBase):
             debugNP.show()
             self.physicsWorld.setDebugNode(debugNP.node())
     
-    def shoot_bullet(self, speed=100, scale=0.2, mass=0.1):
+    def shoot_bullet(self, speed=100, scale=0.2, mass=0.1, color=(1, 1, 1, 1)):
         # Use the camera's position and orientation to shoot the bullet
         position = self.camera.getPos()
         direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
         velocity = direction * speed  # Adjust the speed as necessary
         
         # Create and shoot the bullet
-        self.create_bullet(position, velocity, scale, mass)
+        self.create_bullet(position, velocity, scale, mass, color)
 
     def shoot_big_bullet(self):
-        return self.shoot_bullet(30, 1, 10)
+        return self.shoot_bullet(30, 1, 10, (1, 0, 0, 1))
 
-    def create_bullet(self, position, velocity, scale, mass):
+    def create_bullet(self, position, velocity, scale, mass, color):
         # Bullet model
         bullet_model = self.loader.loadModel("models/misc/sphere.egg")  # Use a simple sphere model
         bullet_node = BulletRigidBodyNode('Bullet')
@@ -186,7 +186,7 @@ class GameEngine(ShowBase):
         bullet_model.setScale(scale)  # Scale down to bullet size
         bullet_shape = BulletSphereShape(scale)  # The collision shape radius
         bullet_node.setMass(mass) 
-        bullet_model.setColor(1, 0, 0, 1)
+        bullet_model.setColor(*color)
         
         bullet_node.addShape(bullet_shape)
         bullet_node.setLinearVelocity(velocity)  # Set initial velocity
@@ -311,9 +311,9 @@ class GameEngine(ShowBase):
         return terrainNode
 
     def generate_perlin_height_map(self, chunk_x, chunk_y):
-        scale = 0.1  # Adjust scale to control the "zoom" level of the noise
+        scale = 0.02  # Adjust scale to control the "zoom" level of the noise
         octaves = 4  # Number of layers of noise to combine
-        persistence = 0.5  # Amplitude of each octave
+        persistence = 1.5  # Amplitude of each octave
         lacunarity = 2.0  # Frequency of each octave
 
         height_map = np.zeros((self.chunk_size + 1, self.chunk_size + 1))
@@ -435,7 +435,7 @@ class GameEngine(ShowBase):
         dt = globalClock.getDt()
         speed = 20  # Existing movement speed
         lift_speed = 10  # Existing up and down speed
-        rotate_speed = 50  # Speed for rotating the camera, adjust as needed
+        rotate_speed = 70  # Speed for rotating the camera, adjust as needed
 
         # Lateral movement
         if inputState.isSet('forward'):
