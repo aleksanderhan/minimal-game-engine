@@ -83,101 +83,36 @@ class GameEngine(ShowBase):
         super().__init__()
         self.args = args
 
-        self.ground_level = 0 
-        self.chunk_size = 64
-        
+        self.chunk_size = 48
         self.chunk_manager = ChunkManager(self)
-        self.voxel_positions = set()
 
         self.camera.setPos(0, -30, 30)
         self.camera.lookAt(0, 0, 0)
 
-        self.setupBulletPhysics()
+        self.setup_physics()
         self.setup_environment()
         self.setup_lighting()
         self.setup_crosshair()
-
-        self.firstUpdate = True  # Add this line to initialize firstUpdate
-
         self.setup_movement_controls()
         self.init_fps_counter()
         self.init_mouse_control()
 
-        self.pitch = 0  # Initialize a variable to keep track of the camera's pitch
-        self.heading = 0  # Initialize a variable to keep track of the camera's heading
-
         self.taskMgr.add(self.move_camera_task, "MoveCameraTask")
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
-        self.taskMgr.add(self.updatePhysics, "updatePhysics")
-        self.taskMgr.add(self.update, "update")
+        self.taskMgr.add(self.update_physics, "UpdatePhysics")
+        self.taskMgr.add(self.update_terrain, "UpdateTerrain")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
-        self.accept('f', self.create_and_place_voxel)
 
-    def setup_crosshair(self):
-        # Path to the crosshair image
-        crosshair_image = 'assets/crosshair.png'
-        
-        # Create and position the crosshair at the center of the screen
-        self.crosshair = OnscreenImage(image=crosshair_image, pos=(0, 0, 0))
-        self.crosshair.setTransparency(TransparencyAttrib.MAlpha)
-        self.crosshair.setScale(0.05, 1, 0.05)
-
-    def create_and_place_voxel(self):
-        # Adjust the multiplier to set the voxel 1 game meter away from the camera
-        position = self.camera.getPos() + self.camera.getQuat().getForward() * 1  # Set distance to 1 game meter
-        # Round the position to snap to grid
-        grid_position = Vec3(round(position.x), round(position.y), round(position.z))
-
-        # Check if a voxel already exists at this position
-        if not self.voxel_exists_at(grid_position):
-            self.create_voxel(grid_position, scale=0.2)
-            self.voxel_positions.add((grid_position.x, grid_position.y, grid_position.z))
-        else:
-            # Optional: Handle the case where a voxel already exists at the intended position
-            pass
-
-    def voxel_exists_at(self, position):
-        # Convert Vec3 position to a tuple for set comparison
-        return (position.x, position.y, position.z) in self.voxel_positions
-
-    def find_nearest_voxel_position(self, position):
-        # This is a simplified version. You might need to check for actual nearest positions
-        # based on your game's logic, e.g., checking adjacent positions for existing voxels.
-        adjustments = [Vec3(1, 0, 0), Vec3(-1, 0, 0), Vec3(0, 1, 0), Vec3(0, -1, 0), Vec3(0, 0, 1), Vec3(0, 0, -1)]
-        for adj in adjustments:
-            adj_position = position + adj
-            if self.voxel_exists_at(adj_position):
-                return adj_position
-        return None
-
-
-
-    def create_voxel(self, position, scale=0.2):
-        voxel_shape = BulletBoxShape(Vec3(scale / 2, scale / 2, scale / 2))
-        voxel_node = BulletRigidBodyNode('Voxel')
-        voxel_node.addShape(voxel_shape)
-        # Check if the voxel is placed on the ground
-        if position.z == self.ground_level:  # Assuming you have a defined ground_level variable
-            voxel_node.setMass(0)  # Make the voxel static if it's on the ground
-        else:
-            voxel_node.setMass(1.0)  # Otherwise, it's dynamic
-        voxel_np = self.render.attachNewNode(voxel_node)
-        voxel_np.setPos(position)
-        self.physicsWorld.attachRigidBody(voxel_node)
-        voxel_model = self.loader.loadModel("models/box.egg")
-        voxel_model.setScale(scale)
-        voxel_model.reparentTo(voxel_np)
-        voxel_model.setColor(0.5, 0.5, 0.5, 1)
-        return voxel_node
-
-    
-    def update(self, task):
-        self.chunk_manager.update_chunks()
-        return Task.cont
-
+    def setup_environment(self):
+        # Create the terrain mesh (both visual and physical)
+        self.create_sphere((32, 32, 10))
+        self.create_sphere((32, 32, 15))
+        self.create_sphere((32, 32, 20))
+        self.create_sphere((32, 32, 25))
+        #build_robot(self.physicsWorld)
 
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
@@ -205,7 +140,6 @@ class GameEngine(ShowBase):
 
         return terrainNP, terrainNode
 
-
     def setup_lighting(self):
         self.setBackgroundColor(0.53, 0.81, 0.98, 1)  # Set the background to light blue
         # Ambient Light
@@ -221,8 +155,7 @@ class GameEngine(ShowBase):
         directional_light_np.setHpr(0, -60, 0)
         self.render.setLight(directional_light_np)
 
-
-    def setupBulletPhysics(self):
+    def setup_physics(self):
         self.physicsWorld = BulletWorld()
         self.physicsWorld.setGravity(Vec3(0, 0, -9.81))
 
@@ -231,57 +164,29 @@ class GameEngine(ShowBase):
             debugNP = render.attachNewNode(debugNode)
             debugNP.show()
             self.physicsWorld.setDebugNode(debugNP.node())
-
-
-    def updatePhysics(self, task):
-        dt = globalClock.getDt()
-        self.physicsWorld.doPhysics(dt)
+    
+    def shoot_bullet(self, speed=100, scale=0.2, mass=0.1):
+        # Use the camera's position and orientation to shoot the bullet
+        position = self.camera.getPos()
+        direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
+        velocity = direction * speed  # Adjust the speed as necessary
         
-        return Task.cont
-    
-    def shoot_bullet(self):
-        if self.mouseWatcherNode.hasMouse():
-            # Get the mouse position in the world
-            mpos = self.mouseWatcherNode.getMouse()
-            
-            # Use the camera's position and orientation to shoot the bullet
-            position = self.camera.getPos()
-            direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
-            velocity = direction * 100  # Adjust the speed as necessary
-            
-            # Create and shoot the bullet
-            self.create_bullet(position, velocity)
-    
+        # Create and shoot the bullet
+        self.create_bullet(position, velocity, scale, mass)
+
     def shoot_big_bullet(self):
-        if self.mouseWatcherNode.hasMouse():
-            # Get the mouse position in the world
-            mpos = self.mouseWatcherNode.getMouse()
-            
-            # Use the camera's position and orientation to shoot the bullet
-            position = self.camera.getPos()
-            direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
-            velocity = direction * 30  # Adjust the speed as necessary
-            
-            # Create and shoot the bullet
-            self.create_bullet(position, velocity, True)
+        return self.shoot_bullet(30, 1, 10)
 
-
-    def create_bullet(self, position, velocity, big_bullet=False):
+    def create_bullet(self, position, velocity, scale, mass):
         # Bullet model
         bullet_model = self.loader.loadModel("models/misc/sphere.egg")  # Use a simple sphere model
         bullet_node = BulletRigidBodyNode('Bullet')
         
         # Bullet physics
-        if big_bullet:
-            bullet_model.setScale(1)  # Scale down to bullet size
-            bullet_shape = BulletSphereShape(1)  # The collision shape radius
-            bullet_node.setMass(10) 
-            bullet_model.setColor(1, 0, 0, 1)
-        else:
-            bullet_model.setScale(0.2)  # Scale down to bullet size
-            bullet_shape = BulletSphereShape(0.2)  # The collision shape radius
-            bullet_node.setMass(0.1)
-        
+        bullet_model.setScale(scale)  # Scale down to bullet size
+        bullet_shape = BulletSphereShape(scale)  # The collision shape radius
+        bullet_node.setMass(mass) 
+        bullet_model.setColor(1, 0, 0, 1)
         
         bullet_node.addShape(bullet_shape)
         bullet_node.setLinearVelocity(velocity)  # Set initial velocity
@@ -293,16 +198,22 @@ class GameEngine(ShowBase):
         self.physicsWorld.attachRigidBody(bullet_node)
         
         return bullet_np
-
     
-    def setup_environment(self):
-        # Create the terrain mesh (both visual and physical)
-        self.create_sphere((32, 32, 10))
-        self.create_sphere((32, 32, 15))
-        self.create_sphere((32, 32, 20))
-        self.create_sphere((32, 32, 25))
-        #build_robot(self.physicsWorld)
+    def create_sphere(self, position, scale=1, mass=10, color=(1, 0, 0, 1)):
+        # Sphere physics
+        sphereShape = BulletSphereShape(scale)  # Match this with the scale of your sphere model
+        sphereNode = BulletRigidBodyNode('Sphere')
+        sphereNode.addShape(sphereShape)
+        sphereNode.setMass(mass)
+        sphereNP = self.render.attachNewNode(sphereNode)
+        sphereNP.setPos(*position)  # Adjust the height to see it fall
+        self.physicsWorld.attachRigidBody(sphereNode)
 
+        # Load the sphere model and attach it to the physics node
+        sphere = self.loader.loadModel("models/misc/sphere.egg")
+        sphere.reparentTo(sphereNP)  # Correctly attach the model to the NodePath
+        sphere.setScale(scale)  # Adjust the scale as needed
+        sphere.setColor(*color)  # Set the sphere's color
 
     def apply_texture_to_terrain(self, board_size, vertices, indices, texture_path):
         # Load the texture
@@ -358,8 +269,6 @@ class GameEngine(ShowBase):
             v = v[1] / board_size
             uv_coords.append((u, v))
         return uv_coords
-
-
 
     def create_mesh_data(self, height_map, board_size, height_scale):
         # Adjust the size for seamless edges
@@ -439,22 +348,25 @@ class GameEngine(ShowBase):
         # Create a 2D NumPy array filled with the specified height value
         height_map = np.full((adjusted_size, adjusted_size), height)
         return height_map
-    
-    def create_sphere(self, position):
-        # Sphere physics
-        sphereShape = BulletSphereShape(1)  # Match this with the scale of your sphere model
-        sphereNode = BulletRigidBodyNode('Sphere')
-        sphereNode.addShape(sphereShape)
-        sphereNode.setMass(10.0)
-        sphereNP = self.render.attachNewNode(sphereNode)
-        sphereNP.setPos(*position)  # Adjust the height to see it fall
-        self.physicsWorld.attachRigidBody(sphereNode)
 
-        # Load the sphere model and attach it to the physics node
-        sphere = self.loader.loadModel("models/misc/sphere.egg")
-        sphere.reparentTo(sphereNP)  # Correctly attach the model to the NodePath
-        sphere.setScale(1)  # Adjust the scale as needed
-        sphere.setColor(1, 0, 0, 1)  # Set the sphere's color
+    def setup_crosshair(self):
+        # Path to the crosshair image
+        crosshair_image = 'assets/crosshair.png'
+        
+        # Create and position the crosshair at the center of the screen
+        self.crosshair = OnscreenImage(image=crosshair_image, pos=(0, 0, 0))
+        self.crosshair.setTransparency(TransparencyAttrib.MAlpha)
+        self.crosshair.setScale(0.05, 1, 0.05)
+
+    def update_physics(self, task):
+        dt = globalClock.getDt()
+        self.physicsWorld.doPhysics(dt)
+        
+        return Task.cont
+    
+    def update_terrain(self, task):
+        self.chunk_manager.update_chunks()
+        return Task.cont
 
     def init_mouse_control(self):
         """Initial setup for mouse control."""
@@ -492,7 +404,6 @@ class GameEngine(ShowBase):
                 self.lastMouseX, self.lastMouseY = mouseX, mouseY
 
         return Task.cont
-
 
     def init_fps_counter(self):
         """Initializes the FPS counter on the screen."""
