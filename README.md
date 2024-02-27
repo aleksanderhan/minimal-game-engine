@@ -36,3 +36,6 @@ Use the keys a,s,d,w to steer the position of the camera and use the mouse to st
 
 ### Procedural generated terrain:
 ![Semi-autogpt example](docs/demo4.gif)
+
+### Place blocks:
+![Semi-autogpt example](docs/demo5.gif)

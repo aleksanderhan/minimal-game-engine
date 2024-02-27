@@ -31,8 +31,10 @@ from panda3d.bullet import BulletBoxShape
 from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
+from functools import lru_cache 
 
-#random.seed()
+
+random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
 
@@ -86,8 +88,8 @@ class GameEngine(ShowBase):
         self.chunk_size = 24
         self.chunk_manager = ChunkManager(self)
 
-        self.camera.setPos(0, 0, 5)
-        self.camera.lookAt(0, 0, 0)
+        self.camera.setPos(0, 0, 10)
+        self.camera.lookAt(5, 5, 0)
 
         self.setup_physics()
         self.setup_environment()
@@ -105,6 +107,7 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
+        self.accept('f', self.create_and_place_voxel)
 
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
@@ -113,6 +116,87 @@ class GameEngine(ShowBase):
         self.create_sphere((5, 5, 20))
         self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
+
+    def get_face_center_from_hit(self, raycast_result, voxel_size=1):
+        hit_normal = raycast_result.getHitNormal()
+        node_path = raycast_result.getNode().getPythonTag("nodePath")  # Assuming the tag has been set correctly
+        voxel_position = node_path.getPos()  # World position of the voxel's center
+
+        # Calculate face center based on the hit normal
+        if abs(hit_normal.x) > 0.5:  # Hit on X-face
+            face_center = voxel_position + Vec3(hit_normal.x * voxel_size / 2, 0, 0)
+        elif abs(hit_normal.y) > 0.5:  # Hit on Y-face
+            face_center = voxel_position + Vec3(0, hit_normal.y * voxel_size / 2, 0)
+        else:  # Hit on Z-face
+            face_center = voxel_position + Vec3(0, 0, hit_normal.z * voxel_size / 2)
+
+        return face_center
+
+
+
+
+    def create_and_place_voxel(self):
+        raycast_result = self.cast_ray_from_camera()
+
+        if raycast_result.hasHit():
+            # place voxel on ground or attatch to face of other voxel
+            hit_node = raycast_result.getNode()
+            hit_pos = raycast_result.getHitPos()
+            hit_normal = raycast_result.getHitNormal()
+            print(hit_node.name)
+            print(hit_pos)
+            print(hit_normal)
+
+            scale = 1
+            if hit_node.name == "Terrain":
+                self.create_voxel(hit_pos, static=True)
+            elif hit_node.name == "Voxel":
+                face_center = self.get_face_center_from_hit(raycast_result)
+                print("face_center", face_center)
+                self.create_voxel(face_center + hit_normal * (scale/2), static=True)
+        else:
+            # place voxel in mid air
+            forward_vec = self.camera.getQuat().getForward()
+            # Calculate the exact position 10 meter in front of the camera
+            position = self.camera.getPos() + forward_vec * 10
+            self.create_voxel(position)
+
+    def create_voxel(self, position, scale=1, static=False):
+        voxel_shape = BulletBoxShape(Vec3(scale / 2, scale / 2, scale / 2))
+        voxel_node = BulletRigidBodyNode('Voxel')
+        node_path = render.attachNewNode(voxel_node)
+        node_path.setPythonTag("nodePath", node_path)
+        voxel_node.addShape(voxel_shape)
+        # Check if the voxel is placed on the ground
+        if static:
+            voxel_node.setMass(0)  # Make the voxel static if it's on the ground
+        else:
+            voxel_node.setMass(1.0)  # Otherwise, it's dynamic
+
+        voxel_np = self.render.attachNewNode(voxel_node)
+        voxel_np.setPos(position)
+        self.physicsWorld.attachRigidBody(voxel_node)
+        
+        voxel_model = self.loader.loadModel("models/box.egg")
+        voxel_model.setScale(scale)
+        voxel_model.reparentTo(voxel_np)
+        voxel_model.setColor(0.5, 0.5, 0.5, 1)
+        voxel_model.setPos(-scale / 2, -scale / 2, -scale / 2)
+
+        return voxel_node
+
+    def cast_ray_from_camera(self, distance=10):
+        """Casts a ray from the camera to detect voxels."""
+        # Get the camera's position and direction
+        cam_pos = self.camera.getPos()
+        cam_dir = self.camera.getQuat().getForward()
+        
+        # Define the ray's start and end points (within a certain distance)
+        start_point = cam_pos
+        end_point = cam_pos + cam_dir * distance  # Adjust the distance as needed
+        
+        # Perform the raycast
+        return self.physicsWorld.rayTestClosest(start_point, end_point)
 
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
@@ -310,6 +394,7 @@ class GameEngine(ShowBase):
         self.physicsWorld.attachRigidBody(terrainNode)
         return terrainNode
 
+    @lru_cache
     def generate_perlin_height_map(self, chunk_x, chunk_y):
         scale = 0.02  # Adjust scale to control the "zoom" level of the noise
         octaves = 4  # Number of layers of noise to combine
