@@ -17,7 +17,7 @@ from panda3d.core import (
 )
 from panda3d.bullet import (
     BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
-    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape  # Conceptual
+    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape
 )
 from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
 from panda3d.core import NodePath
@@ -122,7 +122,7 @@ class GameEngine(ShowBase):
 
     def get_face_center_from_hit(self, raycast_result, voxel_size=1):
         hit_normal = raycast_result.getHitNormal()
-        node_path = raycast_result.getNode().getPythonTag("nodePath")  # Assuming the tag has been set correctly
+        node_path = raycast_result.getNode().getPythonTag("nodePath") 
         voxel_position = node_path.getPos()  # World position of the voxel's center
 
         # Calculate face center based on the hit normal
@@ -138,7 +138,7 @@ class GameEngine(ShowBase):
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
 
-        scale = 1
+        scale = 0.2
         if raycast_result.hasHit():
             # place voxel on ground or attatch to face of other voxel
             hit_node = raycast_result.getNode()
@@ -148,7 +148,7 @@ class GameEngine(ShowBase):
             if hit_node.name == "Terrain":
                 self.create_voxel(hit_pos, scale, static=True)
             elif hit_node.name == "Voxel":
-                face_center = self.get_face_center_from_hit(raycast_result)
+                face_center = self.get_face_center_from_hit(raycast_result, scale)
                 offset = scale / 2
                 self.create_voxel(face_center + hit_normal * offset, scale, static=True)
         else:
