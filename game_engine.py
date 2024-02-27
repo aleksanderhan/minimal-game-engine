@@ -33,13 +33,14 @@ from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
 from functools import lru_cache 
 from panda3d.core import WindowProperties
+from panda3d.core import CollisionNode, CollisionBox, CollisionTraverser, CollisionHandlerQueue, Point3
+from panda3d.core import BitMask32
+from panda3d.bullet import BulletGhostNode
 
 
 random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
-
-
 
 
 class ChunkManager:
@@ -120,6 +121,29 @@ class GameEngine(ShowBase):
         self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
 
+    def check_voxels_inside_volume(self, position, size=1):
+        # Create a Bullet ghost node for collision detection
+        ghost_node = BulletGhostNode('volume_checker')
+        ghost_shape = BulletBoxShape(Vec3(size / 2, size / 2, size / 2))
+        ghost_node.addShape(ghost_shape)
+
+        # Attach the ghost node to the scene graph
+        ghost_np = render.attachNewNode(ghost_node)
+        ghost_np.setPos(Point3(position))
+
+        # Add the ghost node to the physics world for collision detection
+        self.physicsWorld.attachGhost(ghost_node)
+
+        # Perform collision detection
+        overlaps = len(list(filter(lambda x: x.name == "Voxel", ghost_node.getOverlappingNodes())))
+
+        # Clean up by removing the ghost node from the physics world and scene
+        self.physicsWorld.removeGhost(ghost_node)
+        ghost_np.removeNode()
+
+        # If there are overlapping nodes, then voxels are inside the volume
+        return overlaps > 0
+
     def get_face_center_from_hit(self, raycast_result, voxel_size=1):
         hit_normal = raycast_result.getHitNormal()
         node_path = raycast_result.getNode().getPythonTag("nodePath") 
@@ -146,34 +170,43 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.name == "Terrain":
-                self.create_voxel(hit_pos, scale, static=True)
+                if not self.check_voxels_inside_volume(hit_pos, scale):
+                    self.create_voxel(hit_pos, scale, static=True)
             elif hit_node.name == "Voxel":
                 face_center = self.get_face_center_from_hit(raycast_result, scale)
                 offset = scale / 2
                 self.create_voxel(face_center + hit_normal * offset, scale, static=True)
         else:
             # place voxel in mid air
-            forward_vec = self.camera.getQuat().getForward()
             # Calculate the exact position 10 meter in front of the camera
+            forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
             self.create_voxel(position, scale)
 
     def create_voxel(self, position, scale, static=False):
+        # Create the voxel's collision shape
         voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
-        voxel_node = BulletRigidBodyNode('Voxel')
-        node_path = render.attachNewNode(voxel_node)
-        node_path.setPythonTag("nodePath", node_path)
-        voxel_node.addShape(voxel_shape)
-        # Check if the voxel is placed on the ground
-        if static:
-            voxel_node.setMass(0)  # Make the voxel static if it's on the ground
-        else:
-            voxel_node.setMass(1.0)  # Otherwise, it's dynamic
 
-        voxel_np = self.render.attachNewNode(voxel_node)
+        # Create a Bullet rigid body node and attach the collision shape
+        voxel_node = BulletRigidBodyNode('Voxel')
+        voxel_node.addShape(voxel_shape)
+
+        # Set the mass of the voxel (0 for static, >0 for dynamic)
+        if static:
+            voxel_node.setMass(0)  # Static voxel
+        else:
+            voxel_node.setMass(1.0)  # Dynamic voxel
+
+        # Attach the voxel node to the scene graph
+        voxel_np = render.attachNewNode(voxel_node)
+
+        voxel_np.setPythonTag("nodePath", voxel_np)
         voxel_np.setPos(position)
+
+        # Add the voxel to the physics world
         self.physicsWorld.attachRigidBody(voxel_node)
-        
+
+        # Load and attach the visual model for the voxel
         voxel_model = self.loader.loadModel("models/box.egg")
         voxel_model.setScale(scale)
         voxel_model.reparentTo(voxel_np)
@@ -181,6 +214,7 @@ class GameEngine(ShowBase):
         voxel_model.setPos(-scale/2, -scale/2, -scale/2)
 
         return voxel_node
+
 
     def cast_ray_from_camera(self, distance=10):
         """Casts a ray from the camera to detect voxels."""
