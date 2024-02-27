@@ -59,7 +59,7 @@ class ChunkManager:
                     self.load_chunk(x, y)
         # Adjust the identification of chunks to unload, if necessary
         for chunk_pos in list(self.loaded_chunks.keys()):
-            if abs(chunk_pos[0] - chunk_x) > 3 or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
+            if abs(chunk_pos[0] - chunk_x) > levels or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
                 self.unload_chunk(*chunk_pos)
 
     def load_chunk(self, chunk_x, chunk_y):
@@ -132,37 +132,31 @@ class GameEngine(ShowBase):
 
         return face_center
 
-
-
-
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
 
+        scale = 1
         if raycast_result.hasHit():
             # place voxel on ground or attatch to face of other voxel
             hit_node = raycast_result.getNode()
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
-            print(hit_node.name)
-            print(hit_pos)
-            print(hit_normal)
 
-            scale = 1
             if hit_node.name == "Terrain":
-                self.create_voxel(hit_pos, static=True)
+                self.create_voxel(hit_pos, scale, static=True)
             elif hit_node.name == "Voxel":
                 face_center = self.get_face_center_from_hit(raycast_result)
-                print("face_center", face_center)
-                self.create_voxel(face_center + hit_normal * (scale/2), static=True)
+                offset = scale / 2
+                self.create_voxel(face_center + hit_normal * offset, scale, static=True)
         else:
             # place voxel in mid air
             forward_vec = self.camera.getQuat().getForward()
             # Calculate the exact position 10 meter in front of the camera
             position = self.camera.getPos() + forward_vec * 10
-            self.create_voxel(position)
+            self.create_voxel(position, scale)
 
-    def create_voxel(self, position, scale=1, static=False):
-        voxel_shape = BulletBoxShape(Vec3(scale / 2, scale / 2, scale / 2))
+    def create_voxel(self, position, scale, static=False):
+        voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
         voxel_node = BulletRigidBodyNode('Voxel')
         node_path = render.attachNewNode(voxel_node)
         node_path.setPythonTag("nodePath", node_path)
@@ -181,7 +175,7 @@ class GameEngine(ShowBase):
         voxel_model.setScale(scale)
         voxel_model.reparentTo(voxel_np)
         voxel_model.setColor(0.5, 0.5, 0.5, 1)
-        voxel_model.setPos(-scale / 2, -scale / 2, -scale / 2)
+        voxel_model.setPos(-scale/2, -scale/2, -scale/2)
 
         return voxel_node
 
