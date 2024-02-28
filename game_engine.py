@@ -17,7 +17,7 @@ from panda3d.core import (
 )
 from panda3d.bullet import (
     BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
-    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape  # Conceptual
+    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape
 )
 from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
 from panda3d.core import NodePath
@@ -33,13 +33,14 @@ from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
 from functools import lru_cache 
 from panda3d.core import WindowProperties
+from panda3d.core import CollisionNode, CollisionBox, CollisionTraverser, CollisionHandlerQueue, Point3
+from panda3d.core import BitMask32
+from panda3d.bullet import BulletGhostNode
 
 
 random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
-
-
 
 
 class ChunkManager:
@@ -120,9 +121,32 @@ class GameEngine(ShowBase):
         self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
 
+    def check_voxels_inside_volume(self, position, size=1):
+        # Create a Bullet ghost node for collision detection
+        ghost_node = BulletGhostNode('volume_checker')
+        ghost_shape = BulletBoxShape(Vec3(size / 2, size / 2, size / 2))
+        ghost_node.addShape(ghost_shape)
+
+        # Attach the ghost node to the scene graph
+        ghost_np = render.attachNewNode(ghost_node)
+        ghost_np.setPos(Point3(position))
+
+        # Add the ghost node to the physics world for collision detection
+        self.physicsWorld.attachGhost(ghost_node)
+
+        # Perform collision detection
+        overlaps = len(list(filter(lambda x: x.name == "Voxel", ghost_node.getOverlappingNodes())))
+
+        # Clean up by removing the ghost node from the physics world and scene
+        self.physicsWorld.removeGhost(ghost_node)
+        ghost_np.removeNode()
+
+        # If there are overlapping nodes, then voxels are inside the volume
+        return overlaps > 0
+
     def get_face_center_from_hit(self, raycast_result, voxel_size=1):
         hit_normal = raycast_result.getHitNormal()
-        node_path = raycast_result.getNode().getPythonTag("nodePath")  # Assuming the tag has been set correctly
+        node_path = raycast_result.getNode().getPythonTag("nodePath") 
         voxel_position = node_path.getPos()  # World position of the voxel's center
 
         # Calculate face center based on the hit normal
@@ -138,7 +162,7 @@ class GameEngine(ShowBase):
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
 
-        scale = 1
+        scale = 0.2
         if raycast_result.hasHit():
             # place voxel on ground or attatch to face of other voxel
             hit_node = raycast_result.getNode()
@@ -146,34 +170,43 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.name == "Terrain":
-                self.create_voxel(hit_pos, scale, static=True)
+                if not self.check_voxels_inside_volume(hit_pos, scale):
+                    self.create_voxel(hit_pos, scale, static=True)
             elif hit_node.name == "Voxel":
-                face_center = self.get_face_center_from_hit(raycast_result)
+                face_center = self.get_face_center_from_hit(raycast_result, scale)
                 offset = scale / 2
                 self.create_voxel(face_center + hit_normal * offset, scale, static=True)
         else:
             # place voxel in mid air
-            forward_vec = self.camera.getQuat().getForward()
             # Calculate the exact position 10 meter in front of the camera
+            forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
             self.create_voxel(position, scale)
 
     def create_voxel(self, position, scale, static=False):
+        # Create the voxel's collision shape
         voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
-        voxel_node = BulletRigidBodyNode('Voxel')
-        node_path = render.attachNewNode(voxel_node)
-        node_path.setPythonTag("nodePath", node_path)
-        voxel_node.addShape(voxel_shape)
-        # Check if the voxel is placed on the ground
-        if static:
-            voxel_node.setMass(0)  # Make the voxel static if it's on the ground
-        else:
-            voxel_node.setMass(1.0)  # Otherwise, it's dynamic
 
-        voxel_np = self.render.attachNewNode(voxel_node)
+        # Create a Bullet rigid body node and attach the collision shape
+        voxel_node = BulletRigidBodyNode('Voxel')
+        voxel_node.addShape(voxel_shape)
+
+        # Set the mass of the voxel (0 for static, >0 for dynamic)
+        if static:
+            voxel_node.setMass(0)  # Static voxel
+        else:
+            voxel_node.setMass(1.0)  # Dynamic voxel
+
+        # Attach the voxel node to the scene graph
+        voxel_np = render.attachNewNode(voxel_node)
+
+        voxel_np.setPythonTag("nodePath", voxel_np)
         voxel_np.setPos(position)
+
+        # Add the voxel to the physics world
         self.physicsWorld.attachRigidBody(voxel_node)
-        
+
+        # Load and attach the visual model for the voxel
         voxel_model = self.loader.loadModel("models/box.egg")
         voxel_model.setScale(scale)
         voxel_model.reparentTo(voxel_np)
@@ -343,12 +376,17 @@ class GameEngine(ShowBase):
         return terrainNP
 
     def calculate_uv_coordinates(self, vertices, board_size):
-        # Simple UV mapping: map vertex position to UV coordinates
-        uv_coords = []
-        for v in vertices:
-            u = v[0] / board_size
-            v = v[1] / board_size
-            uv_coords.append((u, v))
+        # Extract x and y coordinates from vertices
+        x_coords = vertices[:, 0]
+        y_coords = vertices[:, 1]
+        
+        # Normalize x and y coordinates by board_size to get u and v values
+        u = x_coords / board_size
+        v = y_coords / board_size
+        
+        # Stack u and v to form the UV coordinates array
+        uv_coords = np.stack((u, v), axis=-1)
+        
         return uv_coords
 
     def create_mesh_data(self, height_map, board_size, height_scale):
@@ -364,15 +402,21 @@ class GameEngine(ShowBase):
         # Now x, y, and z have matching shapes, and you can safely stack them
         vertices = np.stack([x, y, z], axis=-1).reshape(-1, 3).astype(np.float32)
 
-        # Adjust index calculation for the extra vertices
-        indices = []
-        for iy in range(board_size):
-            for ix in range(board_size):
-                # Calculate indices for two triangles covering the quad
-                indices += [
-                    iy * adjusted_size + ix, (iy + 1) * adjusted_size + ix, iy * adjusted_size + (ix + 1),
-                    iy * adjusted_size + (ix + 1), (iy + 1) * adjusted_size + ix, (iy + 1) * adjusted_size + (ix + 1)
-                ]
+        # Generate grid of indices (each point in the grid)
+        indices_grid = np.arange(adjusted_size * adjusted_size).reshape(adjusted_size, adjusted_size)
+
+        # Quad corners indices
+        top_left = indices_grid[:-1, :-1].ravel()
+        top_right = indices_grid[:-1, 1:].ravel()
+        bottom_left = indices_grid[1:, :-1].ravel()
+        bottom_right = indices_grid[1:, 1:].ravel()
+
+        # Forming two triangles for each quad
+        triangle1 = np.stack([top_left, bottom_left, top_right], axis=-1)
+        triangle2 = np.stack([top_right, bottom_left, bottom_right], axis=-1)
+
+        # Concatenate triangles to form the square indices
+        indices = np.concatenate([triangle1, triangle2], axis=1).ravel()
 
         return vertices, np.array(indices, dtype=np.int32)
 
