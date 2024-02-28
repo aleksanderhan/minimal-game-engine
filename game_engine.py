@@ -215,7 +215,6 @@ class GameEngine(ShowBase):
 
         return voxel_node
 
-
     def cast_ray_from_camera(self, distance=10):
         """Casts a ray from the camera to detect voxels."""
         # Get the camera's position and direction
@@ -377,12 +376,17 @@ class GameEngine(ShowBase):
         return terrainNP
 
     def calculate_uv_coordinates(self, vertices, board_size):
-        # Simple UV mapping: map vertex position to UV coordinates
-        uv_coords = []
-        for v in vertices:
-            u = v[0] / board_size
-            v = v[1] / board_size
-            uv_coords.append((u, v))
+        # Extract x and y coordinates from vertices
+        x_coords = vertices[:, 0]
+        y_coords = vertices[:, 1]
+        
+        # Normalize x and y coordinates by board_size to get u and v values
+        u = x_coords / board_size
+        v = y_coords / board_size
+        
+        # Stack u and v to form the UV coordinates array
+        uv_coords = np.stack((u, v), axis=-1)
+        
         return uv_coords
 
     def create_mesh_data(self, height_map, board_size, height_scale):
@@ -398,15 +402,21 @@ class GameEngine(ShowBase):
         # Now x, y, and z have matching shapes, and you can safely stack them
         vertices = np.stack([x, y, z], axis=-1).reshape(-1, 3).astype(np.float32)
 
-        # Adjust index calculation for the extra vertices
-        indices = []
-        for iy in range(board_size):
-            for ix in range(board_size):
-                # Calculate indices for two triangles covering the quad
-                indices += [
-                    iy * adjusted_size + ix, (iy + 1) * adjusted_size + ix, iy * adjusted_size + (ix + 1),
-                    iy * adjusted_size + (ix + 1), (iy + 1) * adjusted_size + ix, (iy + 1) * adjusted_size + (ix + 1)
-                ]
+        # Generate grid of indices (each point in the grid)
+        indices_grid = np.arange(adjusted_size * adjusted_size).reshape(adjusted_size, adjusted_size)
+
+        # Quad corners indices
+        top_left = indices_grid[:-1, :-1].ravel()
+        top_right = indices_grid[:-1, 1:].ravel()
+        bottom_left = indices_grid[1:, :-1].ravel()
+        bottom_right = indices_grid[1:, 1:].ravel()
+
+        # Forming two triangles for each quad
+        triangle1 = np.stack([top_left, bottom_left, top_right], axis=-1)
+        triangle2 = np.stack([top_right, bottom_left, bottom_right], axis=-1)
+
+        # Concatenate triangles to form the square indices
+        indices = np.concatenate([triangle1, triangle2], axis=1).ravel()
 
         return vertices, np.array(indices, dtype=np.int32)
 
