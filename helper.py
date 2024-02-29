@@ -24,77 +24,90 @@ from math import cos, sin, radians
 from panda3d.core import Texture
 import random
 from panda3d.core import TransformState, Vec3
+from panda3d.core import Vec3, TransformState
+from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCylinderShape, BulletHingeConstraint
+from direct.showbase.ShowBase import ShowBase
+from math import cos, sin, radians
+from panda3d.core import NodePath, CollisionNode, CollisionSphere, CollisionCapsule
+from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape, BulletCapsuleShape, BulletWorld
+from panda3d.core import TransformState, Vec3
 
 
+from panda3d.core import NodePath, Vec3
+from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCapsuleShape, BulletConeTwistConstraint, BulletHingeConstraint
+from direct.showbase.ShowBase import ShowBase
 
-def build_robot(physicsWorld, position=(10, 10, 10)):
-    # Create spherical body
-    body_shape = BulletSphereShape(1)
-    body_node = BulletRigidBodyNode('Body')
-    body_node.addShape(body_shape)
-    body_np = render.attachNewNode(body_node)
-    body_np.setPos(*position)  # Position the body
-    physicsWorld.attachRigidBody(body_node)
+class Robot:
+    def __init__(self, render, physics_world, position):
+        self.render = render
+        self.physics_world = physics_world
+        self.position = position
+        self.body = None
+        self.legs = []
+        self.joints = []
+        self.create_robot_body()
+        self.create_robot_legs()
 
-    # Add visual model for the body - using a sphere from Panda3D's basic models
-    sphere_model = loader.loadModel('models/misc/sphere')
-    sphere_model.reparentTo(body_np)
-    sphere_model.setScale(1)  # Match the BulletSphereShape's radius
+    def create_robot_body(self):
+        body_shape = BulletSphereShape(0.4)  # Radius of the body
+        self.body_node = BulletRigidBodyNode('robot_body')
+        self.body_node.setMass(1.0)  # Set a non-zero mass
+        self.body_node.addShape(body_shape)
+        self.body = self.render.attachNewNode(self.body_node)
+        self.body.setPos(self.position)  # Starting position of the body
+        self.physics_world.attachRigidBody(self.body_node)
 
-    # Function to create a visual representation of a leg segment
-    def create_leg_segment_visual(parent_np, scale=(0.1, 0.1, 1), pos=Vec3(0, 0, 0)):
-        card_maker = CardMaker('leg_segment')
-        card_maker.setFrame(-0.5, 0.5, -0.5, 0.5)  # Create a square
-        leg_segment_np = parent_np.attachNewNode(card_maker.generate())
-        leg_segment_np.setScale(scale)  # Scale to act as cylinder placeholder
-        leg_segment_np.setPos(pos)
-        return leg_segment_np
+    def create_robot_legs(self):
+        leg_positions = [(0.5, 0.5, 0), (-0.5, 0.5, 0), (0.5, -0.5, 0), (-0.5, -0.5, 0)]
+        for i, (x, y, z) in enumerate(leg_positions):
+            # Create upper leg
+            upper_leg_shape = BulletCapsuleShape(0.05, 0.5)  # Radius and cylinder height
+            upper_leg_node = BulletRigidBodyNode(f'upper_leg_{i}')
+            upper_leg_node.setMass(0.1)
+            upper_leg_node.addShape(upper_leg_shape)
+            upper_leg = self.render.attachNewNode(upper_leg_node)
+            upper_leg.setPos(self.body.getX() + x, self.body.getY() + y, self.body.getZ() + z - 0.5)
+            self.physics_world.attachRigidBody(upper_leg_node)
 
-    # Create legs with physics and visual placeholders
-    leg_length = 2
-    for i in range(4):  # Four legs
-        angle = i * (360 / 4)
-        offset = Vec3(1.5 * cos(radians(angle)), 1.5 * sin(radians(angle)), 0)
+            # Create lower leg
+            lower_leg_shape = BulletCapsuleShape(0.05, 0.5)  # Adjust dimensions as needed
+            lower_leg_node = BulletRigidBodyNode(f'lower_leg_{i}')
+            lower_leg_node.setMass(0.1)
+            lower_leg_node.addShape(lower_leg_shape)
+            lower_leg = self.render.attachNewNode(lower_leg_node)
+            lower_leg.setPos(upper_leg.getX(), upper_leg.getY(), upper_leg.getZ() - 0.5)
+            self.physics_world.attachRigidBody(lower_leg_node)
 
-        # Upper leg part
-        upper_leg_shape = BulletCylinderShape(0.1, leg_length / 2, 2)
-        upper_leg_node = BulletRigidBodyNode(f'UpperLeg{i}')
-        upper_leg_node.addShape(upper_leg_shape)
-        upper_leg_np = render.attachNewNode(upper_leg_node)
-        upper_leg_np.setPos(body_np.getPos() + offset)
-        physicsWorld.attachRigidBody(upper_leg_node)
+            # Create joints
+            # Connect upper leg to the body
+            pivot_in_body = Vec3(x, y, z - 0.5)
+            pivot_in_upper_leg = Vec3(0, 0, 0.25)
+            # Assuming pivot_in_body and pivot_in_upper_leg are Vec3 objects for the pivot positions
+            transform_in_body = TransformState.makePosHpr(Vec3(0, 0, 0), pivot_in_body)
+            transform_in_upper_leg = TransformState.makePosHpr(Vec3(0, 0, 0), pivot_in_upper_leg)
+            upper_leg_joint = BulletConeTwistConstraint(self.body_node, upper_leg_node, transform_in_body, transform_in_upper_leg)
+            cone_twist_joint = BulletConeTwistConstraint(self.body_node, upper_leg_node, transform_in_body, transform_in_upper_leg)
+            cone_twist_joint.setLimit(-1, 1, 0.9, 0.3, 1.0)  # Example values, adjust as needed
+            self.physics_world.attachConstraint(cone_twist_joint)
 
-        # Add visual placeholder for the upper leg
-        create_leg_segment_visual(upper_leg_np, scale=(0.1, 0.1, leg_length / 2), pos=Vec3(0, 0, -leg_length / 4))
+            # Connect lower leg to upper leg
+            pivot_in_upper = Vec3(0, 0, -0.25)
+            pivot_in_lower = Vec3(0, 0, 0.25)
+            hinge_joint = BulletHingeConstraint(upper_leg_node, lower_leg_node, pivot_in_upper, pivot_in_lower, Vec3(1, 0, 0), Vec3(1, 0, 0))
+            hinge_joint.setLimit(-1, 1, 0.9, 0.3, 1.0)  # Example values, adjust as needed
+            self.physics_world.attachConstraint(hinge_joint)
 
-        # Lower leg part
-        lower_leg_shape = BulletCylinderShape(0.1, leg_length / 2, 2)
-        lower_leg_node = BulletRigidBodyNode(f'LowerLeg{i}')
-        lower_leg_node.addShape(lower_leg_shape)
-        lower_leg_np = render.attachNewNode(lower_leg_node)
-        lower_leg_np.setPos(upper_leg_np.getPos() + Vec3(0, 0, -leg_length / 2))
-        physicsWorld.attachRigidBody(lower_leg_node)
+            self.legs.append((upper_leg, lower_leg))
+            self.joints.extend([upper_leg_joint, hinge_joint])
 
-        # Add visual placeholder for the lower leg
-        create_leg_segment_visual(lower_leg_np, scale=(0.1, 0.1, leg_length / 2), pos=Vec3(0, 0, -leg_length / 4))
+    def set_position(self, x, y, z):
+        self.body.node().setKinematic(True)
+        self.body.setPos(x, y, z)
+        self.body.node().setKinematic(False)
 
-        # Joints 
-        # Joint creation between upper and lower leg
-        # Calculate the pivot point and axis for the hinge in world coordinates
-        # Create the transform state for the hinge pivot and axis
-        # The pivot point and axis should be specified relative to each body
-        pivot_in_upper = Vec3(0, 0, -leg_length / 4)  # Adjust this pivot point as needed
-        pivot_in_lower = Vec3(0, 0, leg_length / 4)  # Adjust this pivot point as needed
-        axis_in_upper = Vec3(0, 1, 0)  # Adjust this axis as needed
 
-        # Create transform states for upper and lower bodies
-        transform_upper = TransformState.makePos(pivot_in_upper)
-        transform_lower = TransformState.makePos(pivot_in_lower)
-
-        # Create the hinge joint
-        # Note: Panda3D's API might require the transforms to be passed in a specific way or additional adjustments
-        hinge_joint = BulletHingeConstraint(upper_leg_node, lower_leg_node, transform_upper, transform_lower, True)
-
-        # The last argument 'True' specifies use_frame_a; adjust according to your needs
-
-        physicsWorld.attachConstraint(hinge_joint)
+# Toggle generator. Returns a or b alternatingly on next()
+def toggle(a, b, yield_a=True):
+    while True:
+        (yield a) if yield_a else (yield b)
+        yield_a = not yield_a

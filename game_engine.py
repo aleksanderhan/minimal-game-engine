@@ -26,7 +26,7 @@ from panda3d.core import Vec3, TransformState
 from math import cos, sin, radians
 from panda3d.core import Texture
 import random
-from helper import build_robot
+from helper import toggle, Robot
 from panda3d.bullet import BulletBoxShape
 from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
@@ -36,6 +36,10 @@ from panda3d.core import WindowProperties
 from panda3d.core import CollisionNode, CollisionBox, CollisionTraverser, CollisionHandlerQueue, Point3
 from panda3d.core import BitMask32
 from panda3d.bullet import BulletGhostNode
+from panda3d.bullet import BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape, BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape, BulletBoxShape, BulletCapsuleShape, BulletCharacterControllerNode
+from pathfinding.core.diagonal_movement import DiagonalMovement
+from pathfinding.core.grid import Grid
+from pathfinding.finder.a_star import AStarFinder
 
 
 random.seed()
@@ -67,20 +71,60 @@ class ChunkManager:
                 self.unload_chunk(*chunk_pos)
 
     def load_chunk(self, chunk_x, chunk_y):
-        # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
-        terrainNP, terrainNode = self.game_engine.generate_chunk(chunk_x, chunk_y)
+        # Generate the chunk and obtain components
+        terrainNP, terrainNode, heightmap = self.game_engine.generate_chunk(chunk_x, chunk_y)
         
-        # Store both components in the loaded_chunks dictionary
-        self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode)
+        # Store components and heightmap in the loaded_chunks dictionary
+        self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode, heightmap)
 
     def unload_chunk(self, chunk_x, chunk_y):
         chunk_data = self.loaded_chunks.pop((chunk_x, chunk_y), None)
         if chunk_data:
-            terrainNP, terrainNode = chunk_data
+            terrainNP, terrainNode, _ = chunk_data 
             # Remove the visual component from the scene
             terrainNP.removeNode()
             # Remove the physics component from the physics world
             self.game_engine.physicsWorld.removeRigidBody(terrainNode)
+
+    def get_chunk_heightmap(self):
+        if not self.loaded_chunks:
+            return None  # No chunks loaded
+
+        # Example assuming all heightmaps have the same resolution
+        # and each chunk represents the same spatial extent.
+        heightmap_resolution = self.game_engine.chunk_size + 1   # Or dynamically determine this per chunk
+
+        # Determine the spatial extent of the combined heightmap
+        # based on min and max chunk coordinates in game units.
+        min_x = min(chunk_pos[0] for chunk_pos in self.loaded_chunks.keys())
+        min_y = min(chunk_pos[1] for chunk_pos in self.loaded_chunks.keys())
+        max_x = max(chunk_pos[0] for chunk_pos in self.loaded_chunks.keys())
+        max_y = max(chunk_pos[1] for chunk_pos in self.loaded_chunks.keys())
+
+        # Calculate dimensions of the combined heightmap in grid points
+        width_in_chunks = (max_x - min_x + 1)
+        height_in_chunks = (max_y - min_y + 1)
+        combined_width = width_in_chunks * heightmap_resolution
+        combined_height = height_in_chunks * heightmap_resolution
+
+        # Initialize the combined heightmap
+        combined_heightmap = np.zeros((combined_height, combined_width))
+
+        # Fill in the combined heightmap with data from each chunk
+        for (chunk_x, chunk_y), chunk_data in self.loaded_chunks.items():
+            _, _, heightmap = chunk_data  # Assuming heightmap is the third element
+            
+            # Calculate where to insert this chunk's heightmap into the combined heightmap
+            insert_x = (chunk_x - min_x) * heightmap_resolution
+            insert_y = (chunk_y - min_y) * heightmap_resolution
+            
+            # Insert the chunk's heightmap
+            combined_heightmap[insert_y:insert_y + heightmap_resolution,
+                            insert_x:insert_x + heightmap_resolution] = heightmap
+
+        return combined_heightmap
+
+
 
 
 class GameEngine(ShowBase):
@@ -107,19 +151,144 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
         self.taskMgr.add(self.update_physics, "UpdatePhysics")
-        self.taskMgr.add(self.update_terrain, "UpdateTerrain")
+        if self.args.terrain != None:
+            self.taskMgr.add(self.update_terrain, "UpdateTerrain")
+        #self.taskMgr.doMethodLater(1.0, self.position_ai_character, 'PositionAICharacter')  
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
         self.accept('f', self.create_and_place_voxel)
+        self.accept('r', self.manual_raycast_test)
+        self.accept('g', self.toggle_gravity)
 
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
-        self.create_sphere((5, 5, 10))
-        self.create_sphere((5, 5, 15))
-        self.create_sphere((5, 5, 20))
-        self.create_sphere((5, 5, 25))
-        #build_robot(self.physicsWorld)
+        #self.create_sphere((5, 5, 10))
+        #self.create_sphere((5, 5, 15))
+        #self.create_sphere((5, 5, 20))
+        #self.create_sphere((5, 5, 25))
+        #self.setup_ai_controls()
+        self.robot = Robot(self.render, self.physicsWorld, Vec3(0,0,5))
+        pass
+
+    def manual_raycast_test(self):
+        result = self.cast_ray_from_camera(10000)
+        if result.hasHit():
+            print("Hit at:", result.getHitPos())
+        else:
+            print("No hit detected.")
+
+    def create_ai_character(self, position):
+        ai_model = self.loader.loadModel("models/panda-model")  # Example model
+        ai_model.setScale(0.005)  # Scale down the model
+        ai_model.reparentTo(self.render)
+        ai_model.setPos(position)
+
+        # Add physics for AI character (e.g., a capsule shape)
+        ai_shape = BulletCapsuleShape(0.5, 1, 1)
+        ai_node = BulletCharacterControllerNode(ai_shape, 0.4, 'AI')
+        ai_np = self.render.attachNewNode(ai_node)
+        ai_np.setPos(position)
+        self.physicsWorld.attachCharacter(ai_node)
+
+        return ai_np
+    
+    def move_ai_along_path(self, ai_np, path):
+        # Assuming path is a list of (x, y, z) tuples
+        for target_point in path:
+            while not self.is_at_target(ai_np.getPos(), target_point):
+                # Calculate the desired movement direction vector
+                current_pos = ai_np.getPos()
+                direction_vector = Vec3(target_point.x - current_pos.x, target_point.y - current_pos.y, 0)  # Assuming movement in X and Y plane
+                direction_vector.normalize()
+                
+                # Set the desired speed (units per second)
+                speed = 10  # Adjust as needed
+                desired_movement_vector = direction_vector * speed
+                
+                # Retrieve the character controller and set the linear velocity
+                character_controller = ai_np.getPythonTag("characterController")
+                character_controller.setLinearVelocity(desired_movement_vector)
+                
+                # Wait for a bit before the next update
+                yield None  # This could be adjusted based on your game's timing requirements
+
+    def setup_ai_controls(self):
+
+        self.accept('q', self.move_ai_to_camera_look_at)
+
+    def move_ai_to_camera_look_at(self):
+        # Calculate the camera's look-at point
+        # This is a simplified example. Adjust according to your camera setup
+        cam_pos = self.camera.getPos()
+        cam_dir = self.camera.getQuat().getForward()
+
+        raycast_result = self.cast_ray_from_camera(10000)
+        if raycast_result.hasHit():
+            hit_node = raycast_result.getNode()
+            if hit_node.name == "Terrain":
+                target_pos = cam_pos + cam_dir * 10  # Example target position
+
+                # Calculate path from AI to target_pos using pathfinding
+                path = self.calculate_path(self.ai_character.getPos(), target_pos)
+
+                # Move AI along the path
+                self.taskMgr.add(self.move_ai_along_path(self.ai_character, path), "MoveAITask")
+
+    def calculate_path(self, start_pos, end_pos):
+        # This is a simplified example; you'll need to adapt it to your grid and coordinate system.
+        
+        # Convert world coordinates to grid coordinates
+        start_grid_pos = self.world_to_grid(start_pos)
+        end_grid_pos = self.world_to_grid(end_pos)
+        
+        heightmap = self.chunk_manager.get_chunk_heightmap()
+
+        # Create the grid and set up obstacles based on your terrain
+        matrix = self.generate_grid_matrix_vectorized(heightmap)
+        grid = Grid(matrix=matrix)
+        
+        start_node = grid.node(start_grid_pos[0], start_grid_pos[1])
+        end_node = grid.node(end_grid_pos[0], end_grid_pos[1])
+        
+        finder = AStarFinder(diagonal_movement=DiagonalMovement.always)
+        path, _ = finder.find_path(start_node, end_node, grid)
+        
+        # Convert the path back to world coordinates
+        world_path = [self.grid_to_world(pos) for pos in path]  # Implement grid_to_world
+        
+        print(world_path)
+        return world_path
+    
+    def world_to_grid(self, world_pos):
+        grid_scale = self.chunk_size  # Adjust this scale to fit your game's grid scale
+        grid_origin = Vec3(0, 0, 0)  # Adjust if your grid's origin isn't at the world's (0,0,0)
+
+        # Adjust the world_pos by the grid_origin and scale
+        grid_x = int((world_pos.x - grid_origin.x) / grid_scale)
+        grid_y = int((world_pos.y - grid_origin.y) / grid_scale)
+
+        return (grid_x, grid_y)
+
+    def grid_to_world(self, grid_pos):
+        grid_scale = self.chunk_size  # Ensure this matches the scale used in world_to_grid
+        grid_origin = Vec3(0, 0, 0)  # Ensure this matches the origin used in world_to_grid
+
+        # Convert grid position back to world coordinates
+        # Assuming grid_pos is a tuple of (x, y), directly unpack it
+        # If grid_pos is actually a GridNode with .x and .y, change this to grid_pos.x and grid_pos.y
+        world_x = (grid_pos[0] * grid_scale) + grid_origin.x
+        world_y = (grid_pos[1] * grid_scale) + grid_origin.y
+
+        # Assuming the Z position is determined separately, e.g., via a height map or fixed value
+        world_z = self.find_ground_z(world_x, world_y) if self.find_ground_z else 0
+
+        return Vec3(world_x, world_y, world_z)
+
+    def generate_grid_matrix_vectorized(self, height_map, threshold=5):
+        unwalkable_mask = height_map > threshold
+        grid_matrix = unwalkable_mask.astype(int)
+        return grid_matrix
 
     def check_voxels_inside_volume(self, position, size=1):
         # Create a Bullet ghost node for collision detection
@@ -198,7 +367,7 @@ class GameEngine(ShowBase):
             voxel_node.setMass(1.0)  # Dynamic voxel
 
         # Attach the voxel node to the scene graph
-        voxel_np = render.attachNewNode(voxel_node)
+        voxel_np = self.render.attachNewNode(voxel_node)
 
         voxel_np.setPythonTag("nodePath", voxel_np)
         voxel_np.setPos(position)
@@ -227,32 +396,52 @@ class GameEngine(ShowBase):
         
         # Perform the raycast
         return self.physicsWorld.rayTestClosest(start_point, end_point)
+    
+    def find_ground_z(self, x, y, max_search_height=1000):
+        """
+        Casts a ray downward at the specified x, y position to find the z position of the terrain.
+        
+        :param x: X coordinate
+        :param y: Y coordinate
+        :param max_search_height: The maximum height to search for the ground
+        :return: The Z position of the ground or None if the ground is not found
+        """
+        start_point = Vec3(x, y, max_search_height)
+        end_point = Vec3(x, y, -max_search_height)
+        result = self.physicsWorld.rayTestClosest(start_point, end_point)
+        if result.hasHit():
+            return result.getHitPos().getZ()
+        else:
+            return None  # Ground not found or there's an issue with the raycast setup
 
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
         if self.args.terrain == "perlin":
             height_map = self.generate_perlin_height_map(chunk_x, chunk_y)
-        else:
+        elif self.args.terrain == "flat":
             height_map = self.generate_flat_height_map(self.chunk_size)
 
         # Generate mesh data from the height map
-        vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 7)
+        if self.args.terrain != None:
+            print(self.args.terrain)
+            vertices, indices = self.create_mesh_data(height_map, self.chunk_size, 7)
 
-        # Apply texture based on args
-        texture_path = "assets/grass.png" if self.args.texture == "grass" else "assets/chess.png"
-        # Create terrain geometry and apply texture
-        terrainNP = self.apply_texture_to_terrain(self.chunk_size, vertices, indices, texture_path)
-        terrainNP.reparentTo(self.render)
+            # Apply texture based on args
+            texture_path = "assets/grass.png" if self.args.texture == "grass" else "assets/chess.png"
+            # Create terrain geometry and apply texture
+            
+            terrainNP = self.apply_texture_to_terrain(self.chunk_size, vertices, indices, texture_path)
+            terrainNP.reparentTo(self.render)
 
-        # Position the terrain chunk according to its world coordinates
-        world_x = chunk_x * self.chunk_size
-        world_y = chunk_y * self.chunk_size
-        terrainNP.setPos(world_x, world_y, 0)
+            # Position the terrain chunk according to its world coordinates
+            world_x = chunk_x * self.chunk_size
+            world_y = chunk_y * self.chunk_size
+            terrainNP.setPos(world_x, world_y, 0)
 
-        # Add physics
-        terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)
+            # Add physics
+            terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)
 
-        return terrainNP, terrainNode
+            return terrainNP, terrainNode, height_map
 
     def setup_lighting(self):
         self.setBackgroundColor(0.53, 0.81, 0.98, 1)  # Set the background to light blue
@@ -270,14 +459,18 @@ class GameEngine(ShowBase):
         self.render.setLight(directional_light_np)
 
     def setup_physics(self):
+        self.acceleration_due_to_gravity = toggle(Vec3(0, 0, -9.81), Vec3(0, 0, 0))
         self.physicsWorld = BulletWorld()
-        self.physicsWorld.setGravity(Vec3(0, 0, -9.81))
+        self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
 
         if self.args.debug:
             debugNode = BulletDebugNode('Debug')
-            debugNP = render.attachNewNode(debugNode)
+            debugNP = self.render.attachNewNode(debugNode)
             debugNP.show()
             self.physicsWorld.setDebugNode(debugNP.node())
+
+    def toggle_gravity(self):
+        self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
     
     def shoot_bullet(self, speed=100, scale=0.2, mass=0.1, color=(1, 1, 1, 1)):
         # Use the camera's position and orientation to shoot the bullet
@@ -586,14 +779,23 @@ class GameEngine(ShowBase):
             self.camera.setH(self.camera.getH() - rotate_speed * dt)
 
         return Task.cont
+    
+    def position_ai_character(self, task):
+        z = self.find_ground_z(0, 0)
+        if z is not None:
+            self.ai_character = self.create_ai_character(Vec3(0, 0, z))
+        else:
+            print("Ground not found.")
+        return Task.done  # Ensures this task won't run again
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--terrain', action='store', default="flat")
-    parser.add_argument('--texture', action='store', default="chess")
+    parser.add_argument('--terrain', action='store')
+    parser.add_argument('--texture', action='store')
     parser.add_argument('--debug', action="store_true", default=False)
+    parser.add_argument('-g', action="store", default="-9.81")
     args = parser.parse_args()
 
     game = GameEngine(args)
