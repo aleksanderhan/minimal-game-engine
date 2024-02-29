@@ -31,14 +31,16 @@ from math import cos, sin, radians
 from panda3d.core import NodePath, CollisionNode, CollisionSphere, CollisionCapsule
 from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape, BulletCapsuleShape, BulletWorld
 from panda3d.core import TransformState, Vec3
-
+from panda3d.core import Vec3, TransformState
+from panda3d.bullet import BulletConeTwistConstraint, BulletHingeConstraint
 
 from panda3d.core import NodePath, Vec3
 from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCapsuleShape, BulletConeTwistConstraint, BulletHingeConstraint
 from direct.showbase.ShowBase import ShowBase
 
 class Robot:
-    def __init__(self, render, physics_world, position):
+    def __init__(self, render, physics_world, position, radius=0.5):
+        self.shpere_radius = radius
         self.render = render
         self.physics_world = physics_world
         self.position = position
@@ -58,7 +60,7 @@ class Robot:
         self.physics_world.attachRigidBody(self.body_node)
 
     def create_robot_legs(self):
-        leg_positions = [(0.5, 0.5, 0), (-0.5, 0.5, 0), (0.5, -0.5, 0), (-0.5, -0.5, 0)]
+        leg_positions = [(self.shpere_radius, self.shpere_radius, 0), (-self.shpere_radius, self.shpere_radius, 0), (self.shpere_radius, -self.shpere_radius, 0), (-self.shpere_radius, -self.shpere_radius, 0)]
         for i, (x, y, z) in enumerate(leg_positions):
             # Create upper leg
             upper_leg_shape = BulletCapsuleShape(0.05, 0.5)  # Radius and cylinder height
@@ -66,7 +68,7 @@ class Robot:
             upper_leg_node.setMass(0.1)
             upper_leg_node.addShape(upper_leg_shape)
             upper_leg = self.render.attachNewNode(upper_leg_node)
-            upper_leg.setPos(self.body.getX() + x, self.body.getY() + y, self.body.getZ() + z - 0.5)
+            upper_leg.setPos(self.body.getX() + x, self.body.getY() + y, self.body.getZ() + z - self.shpere_radius)
             self.physics_world.attachRigidBody(upper_leg_node)
 
             # Create lower leg
@@ -75,26 +77,26 @@ class Robot:
             lower_leg_node.setMass(0.1)
             lower_leg_node.addShape(lower_leg_shape)
             lower_leg = self.render.attachNewNode(lower_leg_node)
-            lower_leg.setPos(upper_leg.getX(), upper_leg.getY(), upper_leg.getZ() - 0.5)
+            lower_leg.setPos(upper_leg.getX(), upper_leg.getY(), upper_leg.getZ() - self.shpere_radius)
             self.physics_world.attachRigidBody(lower_leg_node)
 
             # Create joints
             # Connect upper leg to the body
-            pivot_in_body = Vec3(x, y, z - 0.5)
+            pivot_in_body = Vec3(x, y, z - self.shpere_radius)
             pivot_in_upper_leg = Vec3(0, 0, 0.25)
             # Assuming pivot_in_body and pivot_in_upper_leg are Vec3 objects for the pivot positions
             transform_in_body = TransformState.makePosHpr(Vec3(0, 0, 0), pivot_in_body)
             transform_in_upper_leg = TransformState.makePosHpr(Vec3(0, 0, 0), pivot_in_upper_leg)
             upper_leg_joint = BulletConeTwistConstraint(self.body_node, upper_leg_node, transform_in_body, transform_in_upper_leg)
             cone_twist_joint = BulletConeTwistConstraint(self.body_node, upper_leg_node, transform_in_body, transform_in_upper_leg)
-            cone_twist_joint.setLimit(-1, 1, 0.9, 0.3, 1.0)  # Example values, adjust as needed
+            cone_twist_joint.setLimit(0, 0, 0)  # Example values, adjust as needed
             self.physics_world.attachConstraint(cone_twist_joint)
 
             # Connect lower leg to upper leg
             pivot_in_upper = Vec3(0, 0, -0.25)
             pivot_in_lower = Vec3(0, 0, 0.25)
             hinge_joint = BulletHingeConstraint(upper_leg_node, lower_leg_node, pivot_in_upper, pivot_in_lower, Vec3(1, 0, 0), Vec3(1, 0, 0))
-            hinge_joint.setLimit(-1, 1, 0.9, 0.3, 1.0)  # Example values, adjust as needed
+            hinge_joint.setLimit(0, 0)  # Example values, adjust as needed
             self.physics_world.attachConstraint(hinge_joint)
 
             self.legs.append((upper_leg, lower_leg))

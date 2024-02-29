@@ -459,7 +459,7 @@ class GameEngine(ShowBase):
         self.render.setLight(directional_light_np)
 
     def setup_physics(self):
-        self.acceleration_due_to_gravity = toggle(Vec3(0, 0, -9.81), Vec3(0, 0, 0))
+        self.acceleration_due_to_gravity = toggle(Vec3(0, 0, self.args.g), Vec3(0, 0, 0))
         self.physicsWorld = BulletWorld()
         self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
 
@@ -795,7 +795,7 @@ if __name__ == "__main__":
     parser.add_argument('--terrain', action='store')
     parser.add_argument('--texture', action='store')
     parser.add_argument('--debug', action="store_true", default=False)
-    parser.add_argument('-g', action="store", default="-9.81")
+    parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
 
     game = GameEngine(args)
