@@ -2,3 +2,4 @@ panda3d
 pybullet
 pyautogui
 noise
+numpy

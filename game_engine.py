@@ -26,7 +26,7 @@ from panda3d.core import Vec3, TransformState
 from math import cos, sin, radians
 from panda3d.core import Texture
 import random
-from helper import build_robot
+from helper import build_robot, toggle
 from panda3d.bullet import BulletBoxShape
 from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
@@ -112,6 +112,8 @@ class GameEngine(ShowBase):
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
         self.accept('f', self.create_and_place_voxel)
+        self.accept('r', self.manual_raycast_test)
+        self.accept('g', self.toggle_gravity)
 
     def setup_environment(self):
         # Create the terrain mesh (both visual and physical)
@@ -120,6 +122,13 @@ class GameEngine(ShowBase):
         self.create_sphere((5, 5, 20))
         self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
+    
+    def manual_raycast_test(self):
+        result = self.cast_ray_from_camera(10000)
+        if result.hasHit():
+            print("Hit at:", result.getHitPos())
+        else:
+            print("No hit detected.")
 
     def check_voxels_inside_volume(self, position, size=1):
         # Create a Bullet ghost node for collision detection
@@ -175,7 +184,7 @@ class GameEngine(ShowBase):
             elif hit_node.name == "Voxel":
                 face_center = self.get_face_center_from_hit(raycast_result, scale)
                 offset = scale / 2
-                self.create_voxel(face_center + hit_normal * offset, scale, static=True)
+                self.create_voxel(face_center + hit_normal * offset, scale, static=hit_node.static)
         else:
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
@@ -196,9 +205,10 @@ class GameEngine(ShowBase):
             voxel_node.setMass(0)  # Static voxel
         else:
             voxel_node.setMass(1.0)  # Dynamic voxel
+        voxel_node.static = static
 
         # Attach the voxel node to the scene graph
-        voxel_np = render.attachNewNode(voxel_node)
+        voxel_np = self.render.attachNewNode(voxel_node)
 
         voxel_np.setPythonTag("nodePath", voxel_np)
         voxel_np.setPos(position)
@@ -227,6 +237,23 @@ class GameEngine(ShowBase):
         
         # Perform the raycast
         return self.physicsWorld.rayTestClosest(start_point, end_point)
+
+    def find_ground_z(self, x, y, max_search_height=1000):
+        """
+        Casts a ray downward at the specified x, y position to find the z position of the terrain.
+        
+        :param x: X coordinate
+        :param y: Y coordinate
+        :param max_search_height: The maximum height to search for the ground
+        :return: The Z position of the ground or None if the ground is not found
+        """
+        start_point = Vec3(x, y, max_search_height)
+        end_point = Vec3(x, y, -max_search_height)
+        result = self.physicsWorld.rayTestClosest(start_point, end_point)
+        if result.hasHit():
+            return result.getHitPos().getZ()
+        else:
+            return None  # Ground not found or there's an issue with the raycast setup
 
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
@@ -270,14 +297,18 @@ class GameEngine(ShowBase):
         self.render.setLight(directional_light_np)
 
     def setup_physics(self):
+        self.acceleration_due_to_gravity = toggle(Vec3(0, 0, self.args.g), Vec3(0, 0, 0))
         self.physicsWorld = BulletWorld()
-        self.physicsWorld.setGravity(Vec3(0, 0, -9.81))
+        self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
 
         if self.args.debug:
             debugNode = BulletDebugNode('Debug')
-            debugNP = render.attachNewNode(debugNode)
+            debugNP = self.render.attachNewNode(debugNode)
             debugNP.show()
             self.physicsWorld.setDebugNode(debugNP.node())
+
+    def toggle_gravity(self):
+        self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
     
     def shoot_bullet(self, speed=100, scale=0.2, mass=0.1, color=(1, 1, 1, 1)):
         # Use the camera's position and orientation to shoot the bullet
@@ -594,6 +625,7 @@ if __name__ == "__main__":
     parser.add_argument('--terrain', action='store', default="flat")
     parser.add_argument('--texture', action='store', default="chess")
     parser.add_argument('--debug', action="store_true", default=False)
+    parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
 
     game = GameEngine(args)
