@@ -82,6 +82,37 @@ class ChunkManager:
             # Remove the physics component from the physics world
             self.game_engine.physicsWorld.removeRigidBody(terrainNode)
 
+class Block:
+    def __init__(self, game_engine, position, scale, static=False):
+        # Create the voxel's collision shape
+        self.voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
+
+        # Create a Bullet rigid body node and attach the collision shape
+        self.voxel_node = BulletRigidBodyNode('Voxel')
+        self.voxel_node.addShape(self.voxel_shape)
+
+        # Set the mass of the voxel (0 for static, >0 for dynamic)
+        if static:
+            self.voxel_node.setMass(0)  # Static voxel
+        else:
+            self.voxel_node.setMass(1.0)  # Dynamic voxel
+        self.static = static
+
+        # Attach the voxel node to the scene graph
+        self.voxel_np = game_engine.render.attachNewNode(self.voxel_node)
+
+        self.voxel_np.setPythonTag("nodePath", self.voxel_np)
+        self.voxel_np.setPos(position)
+
+        # Add the voxel to the physics world
+        game_engine.physicsWorld.attachRigidBody(self.voxel_node)
+
+        # Load and attach the visual model for the voxel
+        self.voxel_model = game_engine.loader.loadModel("models/box.egg")
+        self.voxel_model.setScale(scale)
+        self.voxel_model.reparentTo(self.voxel_np)
+        self.voxel_model.setColor(0.5, 0.5, 0.5, 1)
+        self.voxel_model.setPos(-scale/2, -scale/2, -scale/2)
 
 class GameEngine(ShowBase):
 
@@ -111,17 +142,13 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
-        self.accept('f', self.create_and_place_voxel)
+        self.accept('f', self.create_and_place_block)
         self.accept('r', self.manual_raycast_test)
         self.accept('g', self.toggle_gravity)
 
     def setup_environment(self):
-        # Create the terrain mesh (both visual and physical)
-        self.create_sphere((5, 5, 10))
-        self.create_sphere((5, 5, 15))
-        self.create_sphere((5, 5, 20))
-        self.create_sphere((5, 5, 25))
         #build_robot(self.physicsWorld)
+        pass
     
     def manual_raycast_test(self):
         result = self.cast_ray_from_camera(10000)
@@ -137,7 +164,7 @@ class GameEngine(ShowBase):
         ghost_node.addShape(ghost_shape)
 
         # Attach the ghost node to the scene graph
-        ghost_np = render.attachNewNode(ghost_node)
+        ghost_np = self.render.attachNewNode(ghost_node)
         ghost_np.setPos(Point3(position))
 
         # Add the ghost node to the physics world for collision detection
@@ -168,10 +195,10 @@ class GameEngine(ShowBase):
 
         return face_center
 
-    def create_and_place_voxel(self):
+    def create_and_place_block(self):
         raycast_result = self.cast_ray_from_camera()
 
-        scale = 0.2
+        scale = 0.5
         if raycast_result.hasHit():
             # place voxel on ground or attatch to face of other voxel
             hit_node = raycast_result.getNode()
@@ -180,50 +207,17 @@ class GameEngine(ShowBase):
 
             if hit_node.name == "Terrain":
                 if not self.check_voxels_inside_volume(hit_pos, scale):
-                    self.create_voxel(hit_pos, scale, static=True)
+                    block = Block(self, hit_pos, scale, static=True)
             elif hit_node.name == "Voxel":
                 face_center = self.get_face_center_from_hit(raycast_result, scale)
                 offset = scale / 2
-                self.create_voxel(face_center + hit_normal * offset, scale, static=hit_node.static)
+                block = Block(self, face_center + hit_normal * offset, scale, static=hit_node.static)
         else:
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
-            self.create_voxel(position, scale)
-
-    def create_voxel(self, position, scale, static=False):
-        # Create the voxel's collision shape
-        voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
-
-        # Create a Bullet rigid body node and attach the collision shape
-        voxel_node = BulletRigidBodyNode('Voxel')
-        voxel_node.addShape(voxel_shape)
-
-        # Set the mass of the voxel (0 for static, >0 for dynamic)
-        if static:
-            voxel_node.setMass(0)  # Static voxel
-        else:
-            voxel_node.setMass(1.0)  # Dynamic voxel
-        voxel_node.static = static
-
-        # Attach the voxel node to the scene graph
-        voxel_np = self.render.attachNewNode(voxel_node)
-
-        voxel_np.setPythonTag("nodePath", voxel_np)
-        voxel_np.setPos(position)
-
-        # Add the voxel to the physics world
-        self.physicsWorld.attachRigidBody(voxel_node)
-
-        # Load and attach the visual model for the voxel
-        voxel_model = self.loader.loadModel("models/box.egg")
-        voxel_model.setScale(scale)
-        voxel_model.reparentTo(voxel_np)
-        voxel_model.setColor(0.5, 0.5, 0.5, 1)
-        voxel_model.setPos(-scale/2, -scale/2, -scale/2)
-
-        return voxel_node
+            block = Block(self, position, scale)
 
     def cast_ray_from_camera(self, distance=10):
         """Casts a ray from the camera to detect voxels."""
@@ -320,7 +314,7 @@ class GameEngine(ShowBase):
         self.create_bullet(position, velocity, scale, mass, color)
 
     def shoot_big_bullet(self):
-        return self.shoot_bullet(30, 1, 10, (1, 0, 0, 1))
+        return self.shoot_bullet(30, 0.5, 10, (1, 0, 0, 1))
 
     def create_bullet(self, position, velocity, scale, mass, color):
         # Bullet model
@@ -343,26 +337,10 @@ class GameEngine(ShowBase):
         self.physicsWorld.attachRigidBody(bullet_node)
         
         return bullet_np
-    
-    def create_sphere(self, position, scale=1, mass=10, color=(1, 0, 0, 1)):
-        # Sphere physics
-        sphereShape = BulletSphereShape(scale)  # Match this with the scale of your sphere model
-        sphereNode = BulletRigidBodyNode('Sphere')
-        sphereNode.addShape(sphereShape)
-        sphereNode.setMass(mass)
-        sphereNP = self.render.attachNewNode(sphereNode)
-        sphereNP.setPos(*position)  # Adjust the height to see it fall
-        self.physicsWorld.attachRigidBody(sphereNode)
-
-        # Load the sphere model and attach it to the physics node
-        sphere = self.loader.loadModel("models/misc/sphere.egg")
-        sphere.reparentTo(sphereNP)  # Correctly attach the model to the NodePath
-        sphere.setScale(scale)  # Adjust the scale as needed
-        sphere.setColor(*color)  # Set the sphere's color
 
     def apply_texture_to_terrain(self, board_size, vertices, indices, texture_path):
         # Load the texture
-        terrainTexture = loader.loadTexture(texture_path)
+        terrainTexture = self.loader.loadTexture(texture_path)
         if terrainTexture:
             print("Texture loaded successfully.")
         else:
