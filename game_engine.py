@@ -19,7 +19,7 @@ from panda3d.bullet import (
     BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
     BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape
 )
-from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
+from panda3d.bullet import BulletRigidBodyNode
 from panda3d.core import NodePath
 from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCylinderShape, BulletHingeConstraint, BulletDebugNode
 from panda3d.core import Vec3, TransformState
@@ -28,13 +28,12 @@ from panda3d.core import Texture
 import random
 from helper import build_robot, toggle
 from panda3d.bullet import BulletBoxShape
-from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
 from functools import lru_cache 
 from panda3d.core import WindowProperties
 from panda3d.core import CollisionNode, CollisionBox, CollisionTraverser, CollisionHandlerQueue, Point3
-from panda3d.core import BitMask32
+from panda3d.core import BitMask32, RigidBodyCombiner   
 from panda3d.bullet import BulletGhostNode
 
 
@@ -44,6 +43,7 @@ loadPrcFileData("", "load-file-type p3assimp")
 
 
 class ChunkManager:
+
     def __init__(self, game_engine):
         self.game_engine = game_engine
         self.loaded_chunks = {}
@@ -81,38 +81,141 @@ class ChunkManager:
             terrainNP.removeNode()
             # Remove the physics component from the physics world
             self.game_engine.physicsWorld.removeRigidBody(terrainNode)
+            
 
-class Block:
+class BlockObject:
+
     def __init__(self, game_engine, position, scale, static=False):
+        self.scale = scale
+        self.initial_pos = position
+        self.game_engine = game_engine
+
         # Create the voxel's collision shape
         self.voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
 
         # Create a Bullet rigid body node and attach the collision shape
         self.voxel_node = BulletRigidBodyNode('Voxel')
         self.voxel_node.addShape(self.voxel_shape)
-
+        
         # Set the mass of the voxel (0 for static, >0 for dynamic)
         if static:
             self.voxel_node.setMass(0)  # Static voxel
         else:
-            self.voxel_node.setMass(1.0)  # Dynamic voxel
-        self.static = static
+            self.voxel_node.setMass(1.0)  # Dynamic voxel    
 
         # Attach the voxel node to the scene graph
         self.voxel_np = game_engine.render.attachNewNode(self.voxel_node)
-
-        self.voxel_np.setPythonTag("nodePath", self.voxel_np)
+        self.voxel_np.setPythonTag("blockObj", self)
         self.voxel_np.setPos(position)
+
+        cube_np = self.create_cube_geom()
+
+        # Load and apply the texture
+        texture = self.game_engine.loader.loadTexture("assets/block.jpeg")
+        cube_np.setTexture(texture)
 
         # Add the voxel to the physics world
         game_engine.physicsWorld.attachRigidBody(self.voxel_node)
 
-        # Load and attach the visual model for the voxel
-        self.voxel_model = game_engine.loader.loadModel("models/box.egg")
-        self.voxel_model.setScale(scale)
-        self.voxel_model.reparentTo(self.voxel_np)
-        self.voxel_model.setColor(0.5, 0.5, 0.5, 1)
-        self.voxel_model.setPos(-scale/2, -scale/2, -scale/2)
+    def create_cube_geom(self):
+        cube_np = NodePath("cube")
+
+        # Create each face with correct orientation and position
+        for i in range(6):
+            face_np = self.create_face(i)
+            face_np.reparentTo(cube_np)
+
+        cube_np.reparentTo(self.voxel_np)
+        cube_np.setPos(0, 0, 0)  # Ensure the cube is centered on its NodePath
+
+        return cube_np
+
+    def create_face(self, face_index):
+        cardMaker = CardMaker(f'face{face_index}')
+        cardMaker.setFrame(-self.scale/2, self.scale/2, -self.scale/2, self.scale/2)
+
+        face_np = NodePath(cardMaker.generate())
+
+        # Position and orient each face correctly
+        if face_index == 0:  # Front
+            face_np.setPos(0, -self.scale/2, 0)
+            face_np.setHpr(0, 0, 0)
+        elif face_index == 1:  # Back
+            face_np.setPos(0, self.scale/2, 0)
+            face_np.setHpr(180, 0, 0)
+        elif face_index == 2:  # Right
+            face_np.setPos(self.scale/2, 0, 0)
+            face_np.setHpr(90, 0, 0)
+        elif face_index == 3:  # Left
+            face_np.setPos(-self.scale/2, 0, 0)
+            face_np.setHpr(-90, 0, 0)
+        elif face_index == 4:  # Top
+            face_np.setPos(0, 0, self.scale/2)
+            face_np.setHpr(0, -90, 0)
+        elif face_index == 5:  # Bottom
+            face_np.setPos(0, 0, -self.scale/2)
+            face_np.setHpr(0, 90, 0)
+
+        return face_np
+
+
+
+    def add_block(self, block):
+        # Create a compound shape to hold all voxel shapes
+        combined_node = BulletRigidBodyNode("CombinedVoxels")
+        self.voxel_node = combined_node        
+        self.voxel_shape, position = self.combine_bullet_box_shapes(self, block)
+        transform = TransformState.makePos(position)
+        combined_node.addShape(self.voxel_shape, transform)
+
+
+        self.game_engine.physicsWorld.removeRigidBody(self.voxel_node)
+        self.game_engine.physicsWorld.removeRigidBody(block.voxel_node)
+        self.voxel_np.removeNode()
+        block.voxel_np.removeNode()
+
+        # Assuming static object, but you could set mass for dynamic behavior
+        combined_node.setMass(self.voxel_node.getMass() + block.voxel_node.getMass())
+        self.game_engine.physicsWorld.attachRigidBody(combined_node)
+
+        # Attach the voxel node to the scene graph
+        self.voxel_np = self.game_engine.render.attachNewNode(combined_node)
+        self.voxel_np.setPythonTag("blockObj", self)
+        self.voxel_np.setPos(position)       
+
+    @staticmethod
+    def combine_bullet_box_shapes(block1, block2):
+        # Assuming node1.get_shape() and node2.get_shape() return BulletBoxShape objects
+        box1 = block1.voxel_shape
+        box2 = block2.voxel_shape
+
+        # Get the half extents of each box
+        half_extents1 = box1.get_half_extents_without_margin()
+        half_extents2 = box2.get_half_extents_without_margin()
+
+        # Retrieve world transforms (positions) of each node
+        transform1 = block1.voxel_node.get_transform()
+        transform2 = block2.voxel_node.get_transform()
+        pos1 = transform1.get_pos()
+        pos2 = transform2.get_pos()
+
+        # Calculate the combined box's dimensions
+        # This simplistic approach assumes the boxes touch along one axis and are aligned
+        # You might need a more complex calculation depending on your specific scenario
+        combined_half_extents = (half_extents1 + half_extents2) / 2
+
+        # Calculate the position of the combined box
+        # This also assumes a simple scenario; adjust as needed
+        combined_pos = (pos1 + pos2) / 2
+
+        # Create the new combined BulletBoxShape
+        combined_box_shape = BulletBoxShape(combined_half_extents)
+
+        # Create a new BulletRigidBodyNode or update an existing one with the combined shape
+        # and set its position to combined_pos
+
+        return combined_box_shape, combined_pos
+
 
 class GameEngine(ShowBase):
 
@@ -182,7 +285,7 @@ class GameEngine(ShowBase):
 
     def get_face_center_from_hit(self, raycast_result, voxel_size=1):
         hit_normal = raycast_result.getHitNormal()
-        node_path = raycast_result.getNode().getPythonTag("nodePath") 
+        node_path = raycast_result.getNode().getPythonTag("blockObj").voxel_np 
         voxel_position = node_path.getPos()  # World position of the voxel's center
 
         # Calculate face center based on the hit normal
@@ -205,19 +308,24 @@ class GameEngine(ShowBase):
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
 
+            block = None
             if hit_node.name == "Terrain":
                 if not self.check_voxels_inside_volume(hit_pos, scale):
-                    block = Block(self, hit_pos, scale, static=True)
-            elif hit_node.name == "Voxel":
+                    block = BlockObject(self, hit_pos, scale, static=True)
+            elif hit_node.name == "Voxel" or hit_node.name == "CombinedVoxels":
                 face_center = self.get_face_center_from_hit(raycast_result, scale)
                 offset = scale / 2
-                block = Block(self, face_center + hit_normal * offset, scale, static=hit_node.static)
+                position = face_center + hit_normal * offset
+                #if not self.check_voxels_inside_volume(position, scale): # needs to not check the borders
+                obj = hit_node.getPythonTag("blockObj")
+                block = BlockObject(self, position, scale, static=hit_node.static)
+                obj.add_block(block)
         else:
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
-            block = Block(self, position, scale)
+            block = BlockObject(self, position, scale)
 
     def cast_ray_from_camera(self, distance=10):
         """Casts a ray from the camera to detect voxels."""
