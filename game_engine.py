@@ -166,7 +166,7 @@ class GameEngine(ShowBase):
         super().__init__()
         self.args = args
 
-        self.chunk_size = 24
+        self.chunk_size = 4
         self.chunk_manager = ChunkManager(self)
 
         self.camera.setPos(0, 0, 10)
@@ -186,51 +186,15 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_physics, "UpdatePhysics")
         self.taskMgr.add(self.update_terrain, "UpdateTerrain")
 
-        # Setup collision callback in your game engine initialization or physics setup
-        self.physicsWorld.setContactAddedCallback(self.myContactCallback)
-
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
         self.accept('f', self.create_and_place_block)
         self.accept('r', self.manual_raycast_test)
         self.accept('g', self.toggle_gravity)
 
-        self.accept('*', self.handleCollisionEvent)
-
-
     def setup_environment(self):
         #build_robot(self.physicsWorld)
         pass
-
-    def handleCollisionEvent(self, *args):
-        # This method will be called for any collision event
-        print("Collision Event Detected:", args)
-        
-    @staticmethod
-    def on_collision(contact):
-        print("collision!", contact)
-        node0 = contact.getNode0().getPythonTag("block")
-        node1 = contact.getNode1().getPythonTag("block")
-        if node0:
-            node0.make_dynamic()
-        if node1:
-            node1.make_dynamic()
-
-    def myContactCallback(contactPoint, colliderA, colliderB):
-        print("collision!!!!")
-        # Access the properties of the contact point and the colliding objects
-        # For example, you might adjust the contact point's friction or restitution
-        contactPoint.setFriction(0.5)
-        contactPoint.setRestitution(0.9)
-        
-        # You can also use this callback to trigger game-specific logic
-        # For instance, checking if either of the colliders is a certain type of object
-        if colliderA.getUserData() == "player" or colliderB.getUserData() == "enemy":
-            print("Player has collided with enemy!")
-
-        # Return True to process the collision, False to ignore it
-        return True
-
     
     def manual_raycast_test(self):
         result = self.cast_ray_from_camera(10000)
