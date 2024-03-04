@@ -20,7 +20,7 @@ from panda3d.bullet import (
     BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape
 )
 from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
-from panda3d.core import NodePath
+from panda3d.core import NodePath, Point3
 from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCylinderShape, BulletHingeConstraint, BulletDebugNode
 from panda3d.core import Vec3, TransformState
 from math import cos, sin, radians
@@ -33,7 +33,7 @@ from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import TransparencyAttrib
 from functools import lru_cache 
 from panda3d.core import WindowProperties
-from panda3d.core import CollisionNode, CollisionBox, CollisionTraverser, CollisionHandlerQueue, Point3
+from panda3d.core import CollisionNode, CollisionSphere, CollisionBox, CollisionTraverser, CollisionHandlerEvent
 from panda3d.core import BitMask32
 from panda3d.bullet import BulletGhostNode
 
@@ -41,7 +41,7 @@ from panda3d.bullet import BulletGhostNode
 random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
-
+loadPrcFileData("", "bullet-enable-contact-events true")
 
 class ChunkManager:
     def __init__(self, game_engine):
@@ -84,6 +84,10 @@ class ChunkManager:
 
 class Block:
     def __init__(self, game_engine, position, scale, static=False):
+        self.scale = scale
+        self.game_engine = game_engine
+        self.static = static
+
         # Create the voxel's collision shape
         self.voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
 
@@ -96,23 +100,65 @@ class Block:
             self.voxel_node.setMass(0)  # Static voxel
         else:
             self.voxel_node.setMass(1.0)  # Dynamic voxel
-        self.static = static
-
+        
         # Attach the voxel node to the scene graph
         self.voxel_np = game_engine.render.attachNewNode(self.voxel_node)
-
-        self.voxel_np.setPythonTag("nodePath", self.voxel_np)
+        self.voxel_np.setPythonTag("block", self)
         self.voxel_np.setPos(position)
+
+        self.geom_np = self.create_cube_geom()
+
+        # Load and apply the texture
+        texture = self.game_engine.loader.loadTexture("assets/block.jpeg")
+        self.geom_np.setTexture(texture)
 
         # Add the voxel to the physics world
         game_engine.physicsWorld.attachRigidBody(self.voxel_node)
+    
+    def make_dynamic(self):
+        if self.static:
+            self.voxel_node.setMass(1.0)
 
-        # Load and attach the visual model for the voxel
-        self.voxel_model = game_engine.loader.loadModel("models/box.egg")
-        self.voxel_model.setScale(scale)
-        self.voxel_model.reparentTo(self.voxel_np)
-        self.voxel_model.setColor(0.5, 0.5, 0.5, 1)
-        self.voxel_model.setPos(-scale/2, -scale/2, -scale/2)
+    def create_cube_geom(self):
+        cube_np = NodePath("cube")
+
+        # Create each face with correct orientation and position
+        for i in range(6):
+            face_np = self.create_face(i)
+            face_np.reparentTo(cube_np)
+
+        cube_np.reparentTo(self.voxel_np)
+        cube_np.setPos(0, 0, 0)  # Ensure the cube is centered on its NodePath
+
+        return cube_np
+
+    def create_face(self, face_index):
+        cardMaker = CardMaker(f'face{face_index}')
+        cardMaker.setFrame(-self.scale/2, self.scale/2, -self.scale/2, self.scale/2)
+
+        face_np = NodePath(cardMaker.generate())
+
+        # Position and orient each face correctly
+        if face_index == 0:  # Front
+            face_np.setPos(0, -self.scale/2, 0)
+            face_np.setHpr(0, 0, 0)
+        elif face_index == 1:  # Back
+            face_np.setPos(0, self.scale/2, 0)
+            face_np.setHpr(180, 0, 0)
+        elif face_index == 2:  # Right
+            face_np.setPos(self.scale/2, 0, 0)
+            face_np.setHpr(90, 0, 0)
+        elif face_index == 3:  # Left
+            face_np.setPos(-self.scale/2, 0, 0)
+            face_np.setHpr(-90, 0, 0)
+        elif face_index == 4:  # Top
+            face_np.setPos(0, 0, self.scale/2)
+            face_np.setHpr(0, -90, 0)
+        elif face_index == 5:  # Bottom
+            face_np.setPos(0, 0, -self.scale/2)
+            face_np.setHpr(0, 90, 0)
+
+        return face_np
 
 class GameEngine(ShowBase):
 
@@ -140,15 +186,51 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_physics, "UpdatePhysics")
         self.taskMgr.add(self.update_terrain, "UpdateTerrain")
 
+        # Setup collision callback in your game engine initialization or physics setup
+        self.physicsWorld.setContactAddedCallback(self.myContactCallback)
+
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
         self.accept('f', self.create_and_place_block)
         self.accept('r', self.manual_raycast_test)
         self.accept('g', self.toggle_gravity)
 
+        self.accept('*', self.handleCollisionEvent)
+
+
     def setup_environment(self):
         #build_robot(self.physicsWorld)
         pass
+
+    def handleCollisionEvent(self, *args):
+        # This method will be called for any collision event
+        print("Collision Event Detected:", args)
+        
+    @staticmethod
+    def on_collision(contact):
+        print("collision!", contact)
+        node0 = contact.getNode0().getPythonTag("block")
+        node1 = contact.getNode1().getPythonTag("block")
+        if node0:
+            node0.make_dynamic()
+        if node1:
+            node1.make_dynamic()
+
+    def myContactCallback(contactPoint, colliderA, colliderB):
+        print("collision!!!!")
+        # Access the properties of the contact point and the colliding objects
+        # For example, you might adjust the contact point's friction or restitution
+        contactPoint.setFriction(0.5)
+        contactPoint.setRestitution(0.9)
+        
+        # You can also use this callback to trigger game-specific logic
+        # For instance, checking if either of the colliders is a certain type of object
+        if colliderA.getUserData() == "player" or colliderB.getUserData() == "enemy":
+            print("Player has collided with enemy!")
+
+        # Return True to process the collision, False to ignore it
+        return True
+
     
     def manual_raycast_test(self):
         result = self.cast_ray_from_camera(10000)
@@ -182,7 +264,7 @@ class GameEngine(ShowBase):
 
     def get_face_center_from_hit(self, raycast_result, voxel_size=1):
         hit_normal = raycast_result.getHitNormal()
-        node_path = raycast_result.getNode().getPythonTag("nodePath") 
+        node_path = raycast_result.getNode().getPythonTag("block").voxel_np
         voxel_position = node_path.getPos()  # World position of the voxel's center
 
         # Calculate face center based on the hit normal
@@ -247,7 +329,7 @@ class GameEngine(ShowBase):
         if result.hasHit():
             return result.getHitPos().getZ()
         else:
-            return None  # Ground not found or there's an issue with the raycast setup
+            return None
 
     def generate_chunk(self, chunk_x, chunk_y):
         # Generate the height map for this chunk
@@ -332,6 +414,8 @@ class GameEngine(ShowBase):
         
         bullet_np = self.render.attachNewNode(bullet_node)
         bullet_np.setPos(position)
+        #bullet_np.node().setCcdMotionThreshold(1e-7)
+        #bullet_np.node().setCcdSweptSphereRadius(0.50)
         bullet_model.reparentTo(bullet_np)
         
         self.physicsWorld.attachRigidBody(bullet_node)
@@ -496,6 +580,12 @@ class GameEngine(ShowBase):
     def update_physics(self, task):
         dt = globalClock.getDt()
         self.physicsWorld.doPhysics(dt)
+
+        # Example manual collision check
+        for node in self.physicsWorld.getRigidBodies():
+            result = self.physicsWorld.contactTest(node)
+            if result.getNumContacts() > 0:
+                print(f"Collision detected for {node.getName()}")
         
         return Task.cont
     
