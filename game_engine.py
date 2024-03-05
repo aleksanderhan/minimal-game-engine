@@ -83,85 +83,6 @@ class ChunkManager:
             # Remove the physics component from the physics world
             self.game_engine.physicsWorld.removeRigidBody(terrainNode)
 
-
-class Block:
-    def __init__(self, game_engine, position, scale, static=False):
-        self.scale = scale
-        self.game_engine = game_engine
-        self.static = static
-
-        # Create the voxel's collision shape
-        self.voxel_shape = BulletBoxShape(Vec3(scale/2, scale/2, scale/2))
-
-        # Create a Bullet rigid body node and attach the collision shape
-        self.voxel_node = BulletRigidBodyNode('Voxel')
-        self.voxel_node.addShape(self.voxel_shape)
-
-        # Set the mass of the voxel (0 for static, >0 for dynamic)
-        if static:
-            self.voxel_node.setMass(0)  # Static voxel
-        else:
-            self.voxel_node.setMass(1.0)  # Dynamic voxel
-        
-        # Attach the voxel node to the scene graph
-        self.voxel_np = game_engine.render.attachNewNode(self.voxel_node)
-        self.voxel_np.setPythonTag("block", self)
-        self.voxel_np.setPos(position)
-
-        self.geom_np = self.create_cube_geom()
-
-        # Load and apply the texture
-        texture = self.game_engine.loader.loadTexture("assets/block.jpeg")
-        self.geom_np.setTexture(texture)
-
-        # Add the voxel to the physics world
-        game_engine.physicsWorld.attachRigidBody(self.voxel_node)
-    
-    def make_dynamic(self):
-        if self.static:
-            self.voxel_node.setMass(1.0)
-
-    def create_cube_geom(self):
-        cube_np = NodePath("cube")
-
-        # Create each face with correct orientation and position
-        for i in range(6):
-            face_np = self.create_face(i)
-            face_np.reparentTo(cube_np)
-
-        cube_np.reparentTo(self.voxel_np)
-        cube_np.setPos(0, 0, 0)  # Ensure the cube is centered on its NodePath
-
-        return cube_np
-
-    def create_face(self, face_index):
-        cardMaker = CardMaker(f'face{face_index}')
-        cardMaker.setFrame(-self.scale/2, self.scale/2, -self.scale/2, self.scale/2)
-
-        face_np = NodePath(cardMaker.generate())
-
-        # Position and orient each face correctly
-        if face_index == 0:  # Front
-            face_np.setPos(0, -self.scale/2, 0)
-            face_np.setHpr(0, 0, 0)
-        elif face_index == 1:  # Back
-            face_np.setPos(0, self.scale/2, 0)
-            face_np.setHpr(180, 0, 0)
-        elif face_index == 2:  # Right
-            face_np.setPos(self.scale/2, 0, 0)
-            face_np.setHpr(90, 0, 0)
-        elif face_index == 3:  # Left
-            face_np.setPos(-self.scale/2, 0, 0)
-            face_np.setHpr(-90, 0, 0)
-        elif face_index == 4:  # Top
-            face_np.setPos(0, 0, self.scale/2)
-            face_np.setHpr(0, -90, 0)
-        elif face_index == 5:  # Bottom
-            face_np.setPos(0, 0, -self.scale/2)
-            face_np.setHpr(0, 90, 0)
-
-        return face_np
-
 class GameEngine(ShowBase):
 
     def __init__(self, args):
@@ -181,7 +102,6 @@ class GameEngine(ShowBase):
         self.camera.setPos(0, 0, 10)
         self.camera.lookAt(5, 5, 0)
 
-        self.create_texture_atlas()
         self.setup_physics()
         self.setup_environment()
         self.setup_lighting()
@@ -198,43 +118,12 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
-        self.accept('f', self.create_and_place_block)
         self.accept('r', self.manual_raycast_test)
         self.accept('g', self.toggle_gravity)
 
     def setup_environment(self):
         #build_robot(self.physicsWorld)
         pass
-
-    def create_texture_atlas(self, output_path="texture_atlas.png"):
-        self.texture_atlas_path = output_path
-        atlas_height = 1024  # The height for each image and the atlas
-        scaled_images = []
-
-        # Load and scale each image
-        for key, path in self.texture_paths.items():
-            img = Image.open(path)
-
-            # Calculate the scaling factor to maintain aspect ratio
-            aspect_ratio = img.width / img.height
-            scaled_width = int(aspect_ratio * atlas_height)
-            scaled_img = img.resize((scaled_width, atlas_height), Image.Resampling.LANCZOS)
-            scaled_images.append(scaled_img)
-
-        # Calculate the total width of the atlas
-        total_width = sum(img.width for img in scaled_images)
-
-        # Create a new atlas image
-        atlas = Image.new('RGBA', (total_width, atlas_height), (0, 0, 0, 0))
-
-        # Paste each scaled image into the atlas
-        current_x = 0
-        for img in scaled_images:
-            atlas.paste(img, (current_x, 0))
-            current_x += img.width
-
-        # Save the atlas
-        atlas.save(output_path)
     
     def manual_raycast_test(self):
         result = self.cast_ray_from_camera(10000)
@@ -242,69 +131,6 @@ class GameEngine(ShowBase):
             print("Hit at:", result.getHitPos())
         else:
             print("No hit detected.")
-
-    def check_voxels_inside_volume(self, position, size=1):
-        # Create a Bullet ghost node for collision detection
-        ghost_node = BulletGhostNode('volume_checker')
-        ghost_shape = BulletBoxShape(Vec3(size / 2, size / 2, size / 2))
-        ghost_node.addShape(ghost_shape)
-
-        # Attach the ghost node to the scene graph
-        ghost_np = self.render.attachNewNode(ghost_node)
-        ghost_np.setPos(Point3(position))
-
-        # Add the ghost node to the physics world for collision detection
-        self.physicsWorld.attachGhost(ghost_node)
-
-        # Perform collision detection
-        overlaps = len(list(filter(lambda x: x.name == "Voxel", ghost_node.getOverlappingNodes())))
-
-        # Clean up by removing the ghost node from the physics world and scene
-        self.physicsWorld.removeGhost(ghost_node)
-        ghost_np.removeNode()
-
-        # If there are overlapping nodes, then voxels are inside the volume
-        return overlaps > 0
-
-    def get_face_center_from_hit(self, raycast_result, voxel_size=1):
-        hit_normal = raycast_result.getHitNormal()
-        node_path = raycast_result.getNode().getPythonTag("block").voxel_np
-        voxel_position = node_path.getPos()  # World position of the voxel's center
-
-        # Calculate face center based on the hit normal
-        if abs(hit_normal.x) > 0.5:  # Hit on X-face
-            face_center = voxel_position + Vec3(hit_normal.x * voxel_size / 2, 0, 0)
-        elif abs(hit_normal.y) > 0.5:  # Hit on Y-face
-            face_center = voxel_position + Vec3(0, hit_normal.y * voxel_size / 2, 0)
-        else:  # Hit on Z-face
-            face_center = voxel_position + Vec3(0, 0, hit_normal.z * voxel_size / 2)
-
-        return face_center
-
-    def create_and_place_block(self):
-        raycast_result = self.cast_ray_from_camera()
-
-        
-        if raycast_result.hasHit():
-            # place voxel on ground or attatch to face of other voxel
-            hit_node = raycast_result.getNode()
-            hit_pos = raycast_result.getHitPos()
-            hit_normal = raycast_result.getHitNormal()
-
-            if hit_node.name == "Terrain":
-                if not self.check_voxels_inside_volume(hit_pos, self.scale):
-                    #block = Block(self, hit_pos, self.scale, static=True)
-                    pass
-            elif hit_node.name == "Voxel":
-                face_center = self.get_face_center_from_hit(raycast_result, self.scale)
-                offset = self.scale / 2
-                #block = Block(self, face_center + hit_normal * offset, self.scale, static=hit_node.static)
-        else:
-            # place voxel in mid air
-            # Calculate the exact position 10 meter in front of the camera
-            forward_vec = self.camera.getQuat().getForward()
-            position = self.camera.getPos() + forward_vec * 10
-            #block = Block(self, position, self.scale)
 
     def cast_ray_from_camera(self, distance=10):
         """Casts a ray from the camera to detect voxels."""
@@ -318,23 +144,6 @@ class GameEngine(ShowBase):
         
         # Perform the raycast
         return self.physicsWorld.rayTestClosest(start_point, end_point)
-
-    def find_ground_z(self, x, y, max_search_height=1000):
-        """
-        Casts a ray downward at the specified x, y position to find the z position of the terrain.
-        
-        :param x: X coordinate
-        :param y: Y coordinate
-        :param max_search_height: The maximum height to search for the ground
-        :return: The Z position of the ground or None if the ground is not found
-        """
-        start_point = Vec3(x, y, max_search_height)
-        end_point = Vec3(x, y, -max_search_height)
-        result = self.physicsWorld.rayTestClosest(start_point, end_point)
-        if result.hasHit():
-            return result.getHitPos().getZ()
-        else:
-            return None
         
     def get_heightmap(self, chunk_x, chunk_y):
         heightmap = self.heightmap_grid.get((chunk_x, chunk_y))
@@ -351,24 +160,13 @@ class GameEngine(ShowBase):
 
         heightmap = self.get_heightmap(chunk_x, chunk_y)
 
-        texture_positions = {
-            1: (0, 0),  # Texture 1 starts at the beginning of the atlas
-            2: (0.5, 0)  # Texture 2 starts halfway across the atlas
-        }
-
-        # Create a 3D grid of z-coordinates
-        z_grid = np.arange(max_height).reshape(1, 1, max_height)
-        # Extend the heightmap to 3D by repeating it along the z-axis
-        heightmap_3d = heightmap[:, :, np.newaxis]
-
-        # Vectorized comparison and filling to create voxel_world directly
-        voxel_world = (z_grid < heightmap_3d).astype(int)
-
-        print(voxel_world)
-        print(voxel_world.shape)
+        # TODO: implement a way to create a randomly initialized 3D numpy array that
+        # represents a voxel world with voxels of type 1 and 2 used as ground,
+        # up to the closests z value of heightmap at that x, y position, and 0 for air.
+        voxel_world = ...
         
-        vertices, indices = self.create_mesh_data(voxel_world, 0.5)
-        terrainNP = self.apply_textures_to_voxels(voxel_world, texture_positions, 2048)
+        vertices, indices = self.create_mesh_data(voxel_world)
+        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
 
         # Position the flat terrain chunk according to its world coordinates
         world_x = chunk_x * self.chunk_size
@@ -442,123 +240,15 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
-    def apply_textures_to_voxels(self, voxel_world, texture_positions, atlas_width):
-        atlas_height = 1024  # Assuming the height of the texture atlas is 1024 pixels
-
-        # Calculate the number of different types of voxels (excluding air)
-        num_voxel_types = len(texture_positions)
-
-        # Create a GeomVertexFormat
-        format = GeomVertexFormat.getV3n3t2()  # For vertices, normals, and texture coordinates
-        vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
-        vdata.setNumRows(4 * num_voxel_types * 6)  # Assuming each voxel can have up to 6 faces, 4 vertices per face
-
-        # Create writers for vertices, normals, and texture coordinates
-        vertex_writer = GeomVertexWriter(vdata, 'vertex')
-        normal_writer = GeomVertexWriter(vdata, 'normal')
-        texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
-
-        # Iterate through the voxel_world to find voxels exposed to air
-        for x in range(voxel_world.shape[0]):
-            for y in range(voxel_world.shape[1]):
-                for z in range(voxel_world.shape[2]):
-                    voxel_type = voxel_world[x, y, z]
-                    if voxel_type == 0:  # Air
-                        continue
-
-                    # Check for exposed faces and add geometry
-                    for dx, dy, dz, nx, ny, nz in [(-1, 0, 0, -1, 0, 0), (1, 0, 0, 1, 0, 0), 
-                                                (0, -1, 0, 0, -1, 0), (0, 1, 0, 0, 1, 0), 
-                                                (0, 0, -1, 0, 0, -1), (0, 0, 1, 0, 0, 1)]:
-                        if not self.is_solid_block(voxel_world, x + dx, y + dy, z + dz):
-                            # Add face geometry
-                            self.add_face_geometry(vertex_writer, normal_writer, texcoord_writer,
-                                                x, y, z, nx, ny, nz, voxel_type, texture_positions, atlas_width, atlas_height)
-
-        # Create a GeomTriangles object to hold the indices
-        geom = Geom(vdata)
-        tris = GeomTriangles(Geom.UHStatic)
-
-        # Add indices to GeomTriangles (left as an exercise)
-        # This part of the code would iterate over the vertices in groups of four (for each face),
-        # and add two triangles per face to the GeomTriangles object.
-
-        geom.addPrimitive(tris)
-
-        # Create a GeomNode and add the Geom object
-        geom_node = GeomNode('voxel_geom')
-        geom_node.addGeom(geom)
-
-        # Attach the GeomNode to a NodePath and add it to the scene
-        terrainNP = NodePath(geom_node)
-        terrainNP.reparentTo(self.render)
-        
-        texture_atlas = self.loader.loadTexture(self.texture_atlas_path)
-        terrainNP.setTexture(texture_atlas)
-        if self.args.debug:
-            self.visualize_normals(terrainNP)
-        return terrainNP
-    
-    def is_solid_block(self, voxel_world, x, y, z):
+    def apply_textures_to_voxels(self, voxel_world, vertices, indices, voxel_size=0.5):
         """
-        Checks if the voxel at the given coordinates is a solid block.
+        TODO: implement method that takes in the vertices and indices of a mesh
+        and computes a square texture geom for each face of the voxels, then combines
+        the square texture geom into a combined geom object that can be applied textures to
 
-        Parameters:
-        - voxel_world: A 3D numpy array representing the voxel world, where the value at each position indicates the voxel type.
-        - x, y, z: The coordinates of the voxel to check.
-
-        Returns:
-        - True if the voxel is a solid block, False if it is air or the coordinates are out of bounds.
+        use uv coordinates and an texture atlas to add textures to the combined geom
         """
-        # Check if the coordinates are within the bounds of the voxel world
-        if 0 <= x < voxel_world.shape[0] and 0 <= y < voxel_world.shape[1] and 0 <= z < voxel_world.shape[2]:
-            return voxel_world[x, y, z] != 0  # Non-zero value indicates a solid block
-        else:
-            # Coordinates are out of bounds, treat as not solid (or air)
-            return False
-
-    
-    def add_face_geometry(self, vertex_writer, normal_writer, texcoord_writer, x, y, z, nx, ny, nz, voxel_type, texture_positions, atlas_width, atlas_height):
-        # Voxel size, assuming voxels are cubic
-        voxel_size = 1
-
-        # Calculate base vertex positions for the face
-        # Offset by half the voxel size to get the corner positions
-        base_vertices = [
-            (x + 0.5, y + 0.5, z + 0.5),
-            (x - 0.5, y + 0.5, z + 0.5),
-            (x - 0.5, y - 0.5, z + 0.5),
-            (x + 0.5, y - 0.5, z + 0.5),
-        ]
-
-        # Adjust vertices based on the normal to select the correct face
-        vertices = []
-        for vx, vy, vz in base_vertices:
-            vx += nx * voxel_size / 2
-            vy += ny * voxel_size / 2
-            vz += nz * voxel_size / 2
-            vertices.append((vx, vy, vz))
-
-        # Write vertices and normals for the face
-        for vx, vy, vz in vertices:
-            vertex_writer.addData3f(vx, vy, vz)
-            normal_writer.addData3f(nx, ny, nz)
-
-        # Calculate and write texture coordinates
-        # Get the UV offset for the voxel type
-        u_offset, v_offset = texture_positions[voxel_type]
-        texture_size = 1024  # Assuming each texture is 1024x1024 in the atlas
-
-        # Define UV coordinates for the face, assuming the entire texture is used for the face
-        uv_coords = [
-            (u_offset, v_offset),
-            (u_offset + texture_size / atlas_width, v_offset),
-            (u_offset + texture_size / atlas_width, v_offset + texture_size / atlas_height),
-            (u_offset, v_offset + texture_size / atlas_height),
-        ]
-
-        for u, v in uv_coords:
-            texcoord_writer.addData2f(u, v)
+        pass
 
     def visualize_normals(self, geom_node, scale=0.5):
         """
@@ -591,126 +281,16 @@ class GameEngine(ShowBase):
         # Add the lines to the NodePath and attach it to render
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
-    
-    @staticmethod
-    def calculate_uv_coordinates_for_cube(voxel_type, texture_positions, atlas_width, atlas_height=1024):
-        # Assume texture_positions maps voxel types to their UV offset in the atlas
-        u_offset, v_offset = texture_positions[voxel_type]
-        texture_size = 1024  # Assuming each texture is 1024x1024 in the atlas
 
-        # Define UV coordinates for each cube face
-        uv_coords = np.array([
-            [u_offset, v_offset], [u_offset + texture_size, v_offset],
-            [u_offset + texture_size, v_offset + texture_size], [u_offset, v_offset + texture_size],
-        ]) / np.array([atlas_width, atlas_height])
 
-        # Each face will use the same UV mapping, but you could adjust this if different faces use different parts of the texture
-        uv_coords = np.tile(uv_coords, (6, 1))
-
-        return uv_coords
-
-    
-    @staticmethod
-    def determine_voxel_type_at_vertex(vertex, voxel_world, world_size, voxel_size):
+    def create_mesh_data(self, voxel_world, voxel_size=0.5):
         """
-        Determines the voxel type at a given vertex position.
+        TODO: implement method that creates vertices and indices mesh data for use in mesh creation
 
-        Parameters:
-        - vertex: The position of the vertex as a (x, y, z) tuple.
-        - voxel_world: A 3D numpy array representing the voxel world, where the value at each position indicates the voxel type.
-        - world_size: The size of the world in the same units as the vertex positions. This is a tuple of (width, length, height).
-        - voxel_size: The size of each voxel in the same units as the vertex positions.
-
-        Returns:
-        - The voxel type at the given vertex position. Returns None if the vertex is outside the voxel world.
+        The method takes in a voxel_world that is a 3D numpy array representing the voxel types at each voxel location in space
+        The method should return an np array of the vertices and indices 
         """
-        # Calculate the voxel indices corresponding to the vertex position
-        voxel_indices = np.floor(np.array(vertex) / voxel_size).astype(int)
-
-        # Check if the indices are within the bounds of the voxel world
-        if np.any(voxel_indices < 0) or np.any(voxel_indices >= np.array(world_size) / voxel_size):
-            #return None  # Vertex is outside the voxel world
-            return 2
-        # Return the voxel type
-        return voxel_world[tuple(voxel_indices)]
-    
-    @staticmethod
-    def find_exposed_faces(voxel_world):
-        """
-        Identifies exposed faces of voxels in a voxelized world.
-        
-        Parameters:
-        - voxel_world: A 3D numpy array where 0s represent air and non-zeros represent solid blocks.
-        
-        Returns:
-        - exposed_faces: A boolean array of the same shape as voxel_world indicating if each voxel face is exposed.
-        """
-        # Expand voxel_world by 1 in each direction with zeros (air)
-        padded_world = np.pad(voxel_world, 1, mode='constant', constant_values=0)
-        
-        # Preparing slices for comparison
-        inside_world = padded_world[1:-1, 1:-1, 1:-1]
-        positive_x = padded_world[2:, 1:-1, 1:-1]
-        negative_x = padded_world[:-2, 1:-1, 1:-1]
-        positive_y = padded_world[1:-1, 2:, 1:-1]
-        negative_y = padded_world[1:-1, :-2, 1:-1]
-        positive_z = padded_world[1:-1, 1:-1, 2:]
-        negative_z = padded_world[1:-1, 1:-1, :-2]
-        
-        # Identifying exposed faces by comparing each voxel to its neighbors
-        exposed_x = (inside_world > 0) & ((positive_x == 0) | (negative_x == 0))
-        exposed_y = (inside_world > 0) & ((positive_y == 0) | (negative_y == 0))
-        exposed_z = (inside_world > 0) & ((positive_z == 0) | (negative_z == 0))
-        
-        # Any voxel with at least one exposed face is considered exposed
-        exposed_faces = exposed_x | exposed_y | exposed_z
-        
-        return exposed_faces
-
-    @staticmethod
-    def create_mesh_data(height_map, voxel_size):
-        vertices = []
-        indices = []
-        depth, height, width = height_map.shape  # Dimensions of the height_map
-        
-        # Directions to check for neighboring air blocks
-        neighbor_dirs = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]
-        
-        def add_face(x, y, z, dir_index):
-            base_index = len(vertices) // 3
-            face_offsets = [
-                [(1, 0, 0), (1, 1, 0), (1, 1, 1), (1, 0, 1)],  # Positive X
-                [(0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0)],  # Negative X
-                [(0, 1, 0), (1, 1, 0), (1, 1, 1), (0, 1, 1)],  # Positive Y
-                [(0, 0, 0), (0, 0, 1), (1, 0, 1), (1, 0, 0)],  # Negative Y
-                [(0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)],  # Positive Z
-                [(0, 0, 0), (0, 1, 0), (1, 1, 0), (1, 0, 0)]   # Negative Z
-            ][dir_index]
-
-            for offset in face_offsets:
-                vertices.extend([(x + offset[0] - 0.5) * voxel_size, 
-                                (y + offset[1] - 0.5) * voxel_size, 
-                                (z + offset[2] - 0.5) * voxel_size])
-            
-            indices.extend([base_index, base_index + 1, base_index + 2, 
-                            base_index, base_index + 2, base_index + 3])
-        
-        for x in range(depth):
-            for y in range(height):
-                for z in range(width):
-                    if height_map[x, y, z] == 0:  # Skip air blocks
-                        continue
-                    
-                    for idx, (dx, dy, dz) in enumerate(neighbor_dirs):
-                        nx, ny, nz = x + dx, y + dy, z + dz
-                        # Check if neighbor is outside the bounds or is air
-                        if nx < 0 or nx >= depth or ny < 0 or ny >= height or nz < 0 or nz >= width or height_map[nx, ny, nz] == 0:
-                            # This voxel is exposed to air, add its face(s) to the mesh
-                            add_face(x, y, z, idx)
-        
-        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
-
-
+        width, length, height = voxel_world.shape
 
 
     def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
@@ -769,13 +349,6 @@ class GameEngine(ShowBase):
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
 
-        return height_map
-    
-    def generate_flat_height_map(self, board_size, height=5):
-        # Adjust board_size to account for the extra row and column for seamless edges
-        adjusted_size = board_size + 1
-        # Create a 2D NumPy array filled with the specified height value
-        height_map = np.full((adjusted_size, adjusted_size), height)
         return height_map
 
     def setup_crosshair(self):
