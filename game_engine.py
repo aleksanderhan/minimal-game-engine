@@ -55,7 +55,7 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self, levels=3):
+    def update_chunks(self, levels=2):
         chunk_x, chunk_y = self.get_player_chunk_pos()
         # Adjust the range to load chunks further out by one additional level
         for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
@@ -91,8 +91,9 @@ class GameEngine(ShowBase):
         self.scale = 0.5
         self.ground_height = 0
 
-        self.chunk_size = 16
+        self.chunk_size = 4
         self.chunk_manager = ChunkManager(self)
+        self.voxel_world_map = {}
         self.texture_paths = {
             "stone": "assets/stone.jpeg",
             "grass": "assets/grass.png"
@@ -146,36 +147,42 @@ class GameEngine(ShowBase):
         
     def get_voxel_world(self, chunk_x, chunk_y):
         # Dimensions of the voxel world
-        max_height = 100
+        max_height = 10
         width = self.chunk_size
         depth = self.chunk_size
 
-        if self.voxel_world is None:
+        if self.voxel_world_map.get((chunk_x, chunk_y)) is None:
             heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
 
             # Initialize a 3D numpy array with zeros (air)
             voxel_world = np.zeros((width, depth, max_height), dtype=np.uint8)
 
+            voxel_world[:, :, 0] = 1 # setting bedrock to be all ground
+
             # Fill the voxel world based on the heightmap
             for x in range(width):
                 for y in range(depth):
                     ground_height = int(heightmap[x, y] * max_height)
-                    for z in range(ground_height):
+                    for z in range(1, ground_height-1):
                         # Randomly choose between two types of ground (1 or 2)
                         voxel_world[x, y, z] = np.random.choice([1, 2], p=[0.5, 0.5])
 
-        return voxel_world
+            self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
+            return voxel_world
+
+        return self.voxel_world_map.get((chunk_x, chunk_y))
         
     def generate_chunk(self, chunk_x, chunk_y):
-        self.voxel_world = self.get_voxel_world(chunk_x, chunk_y)
+        voxel_world = self.get_voxel_world(chunk_x, chunk_y)
         
-        vertices, indices = self.create_mesh_data(self.voxel_world)
-        terrainNP = self.apply_textures_to_voxels(self.voxel_world, vertices, indices)
+        vertices, indices = self.create_mesh_data(voxel_world)
+        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
 
         # Position the flat terrain chunk according to its world coordinates
-        world_x = chunk_x * self.chunk_size
-        world_y = chunk_y * self.chunk_size
-        terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)     
+        world_x = chunk_x * self.chunk_size * self.scale
+        world_y = chunk_y * self.chunk_size * self.scale
+        terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)
+    
 
         return terrainNP, terrainNode
 
@@ -245,14 +252,53 @@ class GameEngine(ShowBase):
         return bullet_np
 
     def apply_textures_to_voxels(self, voxel_world, vertices, indices, voxel_size=0.5):
-        """
-        TODO: implement method that takes in the vertices and indices of a mesh
-        and computes a square texture geom for each face of the voxels, then combines
-        the square texture geom into a combined geom object that can be applied textures to
+        # Assuming `vertices` is a flat list of vertex positions (x, y, z)
+        # and `indices` defines which vertices form each triangle.
 
-        use uv coordinates and an texture atlas to add textures to the combined geom
-        """
-        pass
+        # Load your texture atlas
+        texture_atlas = self.loader.loadTexture("texture_atlas.png")
+
+        # Create a new GeomVertexFormat that includes texture coordinates
+        format = GeomVertexFormat.getV3n3cpt2()  # Position, Normal, Color, Texture coordinates
+        vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
+        
+        # Create writers for vertices, normals (optional), colors (optional), and texture coordinates
+        vertex_writer = GeomVertexWriter(vdata, 'vertex')
+        normal_writer = GeomVertexWriter(vdata, 'normal')
+        texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
+
+        # Example: Add vertices and UVs for each face
+        for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
+            for j in range(6):
+                idx = indices[i + j]
+                vertex_writer.addData3f(vertices[idx * 3], vertices[idx * 3 + 1], vertices[idx * 3 + 2])
+                # Add normal data if you have it
+                # normal_writer.addData3f(...)
+                # Compute and add texture coordinates based on the voxel type and face
+                # This is simplified; you'll need to adjust based on your atlas layout
+                u, v = 0, 0  # Placeholder: Compute these based on the face and voxel type
+                texcoord_writer.addData2f(u, v)
+
+        # Create the GeomTriangles object
+        tris = GeomTriangles(Geom.UHStatic)
+        for i in range(0, len(indices), 3):
+            tris.addVertices(indices[i], indices[i+1], indices[i+2])
+
+        # Combine everything into a Geom
+        geom = Geom(vdata)
+        geom.addPrimitive(tris)
+
+        # Attach the Geom to a GeomNode, and the GeomNode to a NodePath
+        geom_node = GeomNode('voxel_geom')
+        geom_node.addGeom(geom)
+        geom_np = NodePath(geom_node)
+        geom_np.setTexture(texture_atlas)
+
+        # Attach the NodePath to your scene graph where appropriate
+        geom_np.reparentTo(self.render)
+
+        # Return the NodePath, in case it's needed
+        return geom_np
 
     def visualize_normals(self, geom_node, scale=0.5):
         """
@@ -287,21 +333,60 @@ class GameEngine(ShowBase):
         lines_np.reparentTo(self.render)
 
 
-    def create_mesh_data(self, voxel_world, voxel_size=0.5):
-        """
-        TODO: implement method that creates vertices and indices mesh data for use in mesh creation
+    @staticmethod
+    def create_mesh_data(voxel_world, voxel_size=0.5):
+        vertices = []
+        indices = []
+        index = 0  # Keep track of the last index used
 
-        The method takes in a voxel_world that is a 3D numpy array representing the voxel world where each entry in the array is an
-        integer that represents what voxel type occupies the corresponding location in space. The voxel_world first entry is
-        a 2D numpy array representing the ground plane, then the next would be the pane above that.
+        # Define the offsets for the 8 corners of a cube
+        corner_offsets = [
+            np.array([0, 0, 0]),
+            np.array([1, 0, 0]),
+            np.array([1, 1, 0]),
+            np.array([0, 1, 0]),
+            np.array([0, 0, 1]),
+            np.array([1, 0, 1]),
+            np.array([1, 1, 1]),
+            np.array([0, 1, 1]),
+        ]
+        
+        # Adjust the offsets based on the voxel size
+        corner_offsets = [offset * voxel_size for offset in corner_offsets]
 
-        the way the mesh data is to be generated is by using the voxel_world as a map for tracing out the
-        surface of the world. i.e. by looking at every flat surface of the voxels that are in contact with air
-        and adding that to the mesh
+        # Faces defined by indices into the corner_offsets, corresponding to quad vertices
+        face_corners = [
+            [0, 1, 5, 4],  # Front face
+            [1, 2, 6, 5],  # Right face
+            [2, 3, 7, 6],  # Back face
+            [3, 0, 4, 7],  # Left face
+            [4, 5, 6, 7],  # Top face
+            [0, 3, 2, 1],  # Bottom face
+        ]
 
-        The method should return an np array of the vertices and indices used in mesh generation
-        """
         width, length, height = voxel_world.shape
+        for x in range(width):
+            for y in range(length):
+                for z in range(height):
+                    # Check if the voxel is not air
+                    if voxel_world[x, y, z] != 0:
+                        # Iterate over each face to determine if it should be added
+                        for face in face_corners:
+                            # Assume all faces are exposed for simplicity
+                            # Generate vertices for this face
+                            face_vertices = [corner_offsets[corner] + np.array([x, y, z]) * voxel_size for corner in face]
+                            vertices.extend(face_vertices)
+                            
+                            # Add indices for the two triangles that make up this face
+                            indices.extend([index, index+1, index+2, index, index+2, index+3])
+                            index += 4  # Increment the index for the next set of vertices
+
+        # Convert vertices to a flat list of coordinates
+        vertices_flat = []
+        for vertex in vertices:
+            vertices_flat.extend(vertex)
+
+        return np.array(vertices_flat, dtype=np.float32), np.array(indices, dtype=np.uint32)
 
 
     def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
@@ -355,7 +440,7 @@ class GameEngine(ShowBase):
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=0)  # Base can be any constant, adjust for different terrains
+                                    base=1)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
