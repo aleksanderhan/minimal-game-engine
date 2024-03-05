@@ -55,7 +55,7 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self, levels=2):
+    def update_chunks(self, levels=3):
         chunk_x, chunk_y = self.get_player_chunk_pos()
         # Adjust the range to load chunks further out by one additional level
         for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
@@ -182,7 +182,7 @@ class GameEngine(ShowBase):
         world_x = chunk_x * self.chunk_size * self.scale
         world_y = chunk_y * self.chunk_size * self.scale
         terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)
-    
+        terrainNP.setPos(world_x, world_y, 0)
 
         return terrainNP, terrainNode
 
@@ -252,53 +252,87 @@ class GameEngine(ShowBase):
         return bullet_np
 
     def apply_textures_to_voxels(self, voxel_world, vertices, indices, voxel_size=0.5):
-        # Assuming `vertices` is a flat list of vertex positions (x, y, z)
-        # and `indices` defines which vertices form each triangle.
-
-        # Load your texture atlas
         texture_atlas = self.loader.loadTexture("texture_atlas.png")
-
-        # Create a new GeomVertexFormat that includes texture coordinates
-        format = GeomVertexFormat.getV3n3cpt2()  # Position, Normal, Color, Texture coordinates
+        format = GeomVertexFormat.getV3n3cpt2()
         vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
-        
-        # Create writers for vertices, normals (optional), colors (optional), and texture coordinates
+
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
         normal_writer = GeomVertexWriter(vdata, 'normal')
+        color_writer = GeomVertexWriter(vdata, 'color')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
-        # Example: Add vertices and UVs for each face
+        # Placeholder for UV mapping logic
+        # Assuming two types: type 1 uses the first half, type 2 uses the second half of the atlas
+        uv_maps = {
+            1: [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],  # UV coordinates for type 1
+            2: [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)]   # UV coordinates for type 2
+        }
+
+        # Assuming `voxel_type_map` tells us the type of each voxel at each vertex
+        voxel_type_map = self.generate_voxel_type_map(voxel_world) # You need to implement this
+
+        tris = GeomTriangles(Geom.UHStatic)
         for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
             for j in range(6):
                 idx = indices[i + j]
                 vertex_writer.addData3f(vertices[idx * 3], vertices[idx * 3 + 1], vertices[idx * 3 + 2])
-                # Add normal data if you have it
-                # normal_writer.addData3f(...)
-                # Compute and add texture coordinates based on the voxel type and face
-                # This is simplified; you'll need to adjust based on your atlas layout
-                u, v = 0, 0  # Placeholder: Compute these based on the face and voxel type
+
+                # Determine voxel type for this vertex, simplified logic
+                voxel_type = voxel_type_map.get(idx, 1)  # Default to type 1 if not found
+                uvs = uv_maps[voxel_type]
+
+                # Assuming a consistent ordering, simplified for illustration
+                u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
                 texcoord_writer.addData2f(u, v)
 
-        # Create the GeomTriangles object
-        tris = GeomTriangles(Geom.UHStatic)
-        for i in range(0, len(indices), 3):
-            tris.addVertices(indices[i], indices[i+1], indices[i+2])
+            # Define the two triangles that make up the quad
+            tris.addVertices(i, i + 1, i + 2)
+            tris.addVertices(i + 3, i + 4, i + 5)
 
-        # Combine everything into a Geom
         geom = Geom(vdata)
         geom.addPrimitive(tris)
 
-        # Attach the Geom to a GeomNode, and the GeomNode to a NodePath
         geom_node = GeomNode('voxel_geom')
         geom_node.addGeom(geom)
         geom_np = NodePath(geom_node)
         geom_np.setTexture(texture_atlas)
-
-        # Attach the NodePath to your scene graph where appropriate
         geom_np.reparentTo(self.render)
 
-        # Return the NodePath, in case it's needed
         return geom_np
+    
+    def generate_voxel_type_map(self, voxel_world):
+        voxel_type_map = {}
+        
+        # Example logic: Assign types based on the z-coordinate (height) of the voxel
+        # This is a simplification. You may need a more complex logic based on your game's requirements.
+        width, depth, height = voxel_world.shape
+        for x in range(width):
+            for y in range(depth):
+                for z in range(height):
+                    voxel_type = voxel_world[x, y, z]
+                    if voxel_type != 0:  # Assuming 0 is air or no voxel
+                        # Map every vertex in this voxel to its type
+                        # Vertex indices could be calculated or mapped based on your mesh generation logic
+                        # This is a placeholder logic for illustration
+                        vertex_indices = self.get_vertex_indices_for_voxel(x, y, z)
+                        for idx in vertex_indices:
+                            voxel_type_map[idx] = voxel_type
+        
+        return voxel_type_map
+
+    def get_vertex_indices_for_voxel(self, x, y, z):
+        # Placeholder for mapping voxel coordinates to vertex indices in your mesh
+        # This highly depends on how you're constructing your mesh
+        # For example, if you're adding vertices in a predictable order for each voxel,
+        # you could calculate indices based on the voxel's position and the order of vertices
+        indices = []
+        # Calculate indices based on x, y, z and how vertices are added for each voxel
+        # This is just a conceptual placeholder
+        base_index = (x * self.chunk_size * self.chunk_size + y * self.chunk_size + z) * 8  # Assuming 8 vertices per voxel, for example
+        indices.extend(range(base_index, base_index + 8))  # Adjust based on actual mesh construction
+        return indices
+
+
 
     def visualize_normals(self, geom_node, scale=0.5):
         """
