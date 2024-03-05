@@ -93,7 +93,6 @@ class GameEngine(ShowBase):
 
         self.chunk_size = 16
         self.chunk_manager = ChunkManager(self)
-        self.heightmap_grid = {}
         self.texture_paths = {
             "stone": "assets/stone.jpeg",
             "grass": "assets/grass.png"
@@ -145,28 +144,29 @@ class GameEngine(ShowBase):
         # Perform the raycast
         return self.physicsWorld.rayTestClosest(start_point, end_point)
         
-    def get_heightmap(self, chunk_x, chunk_y):
-        heightmap = self.heightmap_grid.get((chunk_x, chunk_y))
-        
-        if heightmap is None:
+    def get_voxel_world(self, chunk_x, chunk_y):
+        # Dimensions of the voxel world
+        max_height = 100
+        width = self.chunk_size
+        depth = self.chunk_size
+
+        if self.voxel_world is None:
             heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
-            self.heightmap_grid[(chunk_x, chunk_y)] = heightmap
+
+            # TODO: implement a way to create a randomly initialized 3D numpy array that
+            # represents a voxel world with voxels of type 1 and 2 used as ground,
+            # up to the closests z value of heightmap at that x, y position, and 0 for air.
+            # The arrays first entry should be a 2D np array of the first ground plane of voxels,
+            # The next, would be the plane above, etc.
             
-        return heightmap
+            # set and return voxel_world
+        return self.voxel_world
         
     def generate_chunk(self, chunk_x, chunk_y):
-        # Dimensions of your voxel world
-        max_height = 100
-
-        heightmap = self.get_heightmap(chunk_x, chunk_y)
-
-        # TODO: implement a way to create a randomly initialized 3D numpy array that
-        # represents a voxel world with voxels of type 1 and 2 used as ground,
-        # up to the closests z value of heightmap at that x, y position, and 0 for air.
-        voxel_world = ...
+        self.voxel_world = self.get_voxel_world(chunk_x, chunk_y)
         
-        vertices, indices = self.create_mesh_data(voxel_world)
-        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
+        vertices, indices = self.create_mesh_data(self.voxel_world)
+        terrainNP = self.apply_textures_to_voxels(self.voxel_world, vertices, indices)
 
         # Position the flat terrain chunk according to its world coordinates
         world_x = chunk_x * self.chunk_size
