@@ -153,14 +153,18 @@ class GameEngine(ShowBase):
         if self.voxel_world is None:
             heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
 
-            # TODO: implement a way to create a randomly initialized 3D numpy array that
-            # represents a voxel world with voxels of type 1 and 2 used as ground,
-            # up to the closests z value of heightmap at that x, y position, and 0 for air.
-            # The arrays first entry should be a 2D np array of the first ground plane of voxels,
-            # The next, would be the plane above, etc.
-            
-            # set and return voxel_world
-        return self.voxel_world
+            # Initialize a 3D numpy array with zeros (air)
+            voxel_world = np.zeros((width, depth, max_height), dtype=np.uint8)
+
+            # Fill the voxel world based on the heightmap
+            for x in range(width):
+                for y in range(depth):
+                    ground_height = int(heightmap[x, y] * max_height)
+                    for z in range(ground_height):
+                        # Randomly choose between two types of ground (1 or 2)
+                        voxel_world[x, y, z] = np.random.choice([1, 2], p=[0.5, 0.5])
+
+        return voxel_world
         
     def generate_chunk(self, chunk_x, chunk_y):
         self.voxel_world = self.get_voxel_world(chunk_x, chunk_y)
@@ -287,8 +291,15 @@ class GameEngine(ShowBase):
         """
         TODO: implement method that creates vertices and indices mesh data for use in mesh creation
 
-        The method takes in a voxel_world that is a 3D numpy array representing the voxel types at each voxel location in space
-        The method should return an np array of the vertices and indices 
+        The method takes in a voxel_world that is a 3D numpy array representing the voxel world where each entry in the array is an
+        integer that represents what voxel type occupies the corresponding location in space. The voxel_world first entry is
+        a 2D numpy array representing the ground plane, then the next would be the pane above that.
+
+        the way the mesh data is to be generated is by using the voxel_world as a map for tracing out the
+        surface of the world. i.e. by looking at every flat surface of the voxels that are in contact with air
+        and adding that to the mesh
+
+        The method should return an np array of the vertices and indices used in mesh generation
         """
         width, length, height = voxel_world.shape
 
