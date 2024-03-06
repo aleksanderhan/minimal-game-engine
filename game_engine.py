@@ -381,7 +381,7 @@ class GameEngine(ShowBase):
         for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
             face_index = i // 6 % 6  # There are 6 faces per cube; adjust if your model differs
             # Get the normal for this face
-            normal = np.array([0, 0, 0])  # Initialize with a default normal; replace with your actual normals
+            normal = normals[face_index]  # Initialize with a default normal; replace with your actual normals
             
             for j in range(6):  # For each vertex in the quad
                 idx = indices[i + j]
@@ -479,44 +479,81 @@ class GameEngine(ShowBase):
         lines_np.reparentTo(self.render)
 
     @staticmethod
-    def create_mesh_data(voxel_world, voxel_size=0.5):
-        exposed_faces = GameEngine.identify_exposed_voxels(voxel_world)
-        
-        # Define offsets for the 8 corners of a cube, adjusted by voxel size
-        corner_offsets = np.array([
-            [0, 0, 0], [voxel_size, 0, 0], [voxel_size, voxel_size, 0], [0, voxel_size, 0],
-            [0, 0, voxel_size], [voxel_size, 0, voxel_size], [voxel_size, voxel_size, voxel_size], [0, voxel_size, voxel_size]
-        ])
-
-        # Faces defined by indices into the corner_offsets, corresponding to quad vertices
-        face_corners = [
-            [0, 1, 5, 4],  # Front face
-            [1, 2, 6, 5],  # Right face
-            [2, 3, 7, 6],  # Back face
-            [3, 0, 4, 7],  # Left face
-            [4, 5, 6, 7],  # Top face
-            [0, 3, 2, 1]   # Bottom face
-        ]
-
-        # Initialize vertices and indices lists
+    def create_mesh_data(voxel_world, voxel_size):
+        exposed_voxels = GameEngine.identify_exposed_voxels(voxel_world)
         vertices = []
         indices = []
 
-        # Iterate only over exposed voxels
-        for x, y, z in np.argwhere(exposed_faces):
-            for face_id, face in enumerate(face_corners):
-                face_vertices = corner_offsets[face] + np.array([x * voxel_size, y * voxel_size, z * voxel_size])
-                vertices.extend(face_vertices.reshape(-1).tolist())
-                base_index = len(vertices) // 3 - 4
-                indices.extend([base_index, base_index + 1, base_index + 2, base_index, base_index + 2, base_index + 3])
+        # Directions for front, back, left, right, top, bottom faces
+        directions = [
+            Vec3(0, 0, 1), Vec3(0, 0, -1),
+            Vec3(-1, 0, 0), Vec3(1, 0, 0),
+            Vec3(0, 1, 0), Vec3(0, -1, 0),
+        ]
 
-        vertices_array = np.array(vertices, dtype=np.float32)
-        indices_array = np.array(indices, dtype=np.uint32)
+        vertex_offsets = [
+            [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
+            [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],
+        ]
 
-        return vertices_array, indices_array
+        # Map each face direction to its corresponding vertex indices
+        face_vertex_indices = [
+            [4, 5, 6, 7],  # top
+            [0, 1, 2, 3],  # bottom
+            [0, 4, 7, 3],  # front
+            [1, 5, 6, 2],  # back
+            [0, 4, 5, 1],  # left
+            [3, 7, 6, 2],  # right
+        ]
+
+        for x in range(voxel_world.shape[0]):
+            for y in range(voxel_world.shape[1]):
+                for z in range(voxel_world.shape[2]):
+                    if not exposed_voxels[x, y, z]:
+                        continue
+                        
+                    for face_index, direction in enumerate(directions):
+                        if GameEngine.is_face_exposed(voxel_world, x, y, z, direction):
+                            # Add vertices for this face
+                            for vertex_index in face_vertex_indices[face_index]:
+                                offset = vertex_offsets[vertex_index]
+                                vertices.append([
+                                    (x + offset[0]) * voxel_size,
+                                    (y + offset[1]) * voxel_size,
+                                    (z + offset[2]) * voxel_size,
+                                ])
+
+                            base_index = len(vertices) - 4
+                            # Two triangles per face
+                            indices.extend([
+                                base_index, base_index + 1, base_index + 2,
+                                base_index, base_index + 2, base_index + 3,
+                            ])
+        
+        # Flatten the vertices list for Panda3D
+        vertices_flat = [item for sublist in vertices for item in sublist]
+        return vertices_flat, indices
+
+    @staticmethod
+    def is_face_exposed(voxel_world, x, y, z, direction):
+        # Check if the adjacent voxel in the given direction is air (0) or out of bounds
+        adjacent_pos = Vec3(x, y, z) + direction
+        if (0 <= adjacent_pos.x < voxel_world.shape[0] and
+            0 <= adjacent_pos.y < voxel_world.shape[1] and
+            0 <= adjacent_pos.z < voxel_world.shape[2]):
+            return voxel_world[int(adjacent_pos.x), int(adjacent_pos.y), int(adjacent_pos.z)] == 0
+        return True  # Exposed if out of bounds
+
 
     @staticmethod
     def identify_exposed_voxels(voxel_world):
+        """
+        Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
+        True means it is exposed to air, False means it's not.
+
+        Parameters:
+            - voxel_world: a 3D numpy array representing the voxel types as integers in the world
+        """
         # Pad the voxel world with zeros (air) on all sides
         padded_world = np.pad(voxel_world, pad_width=1, mode='constant', constant_values=0)
         
@@ -591,7 +628,7 @@ class GameEngine(ShowBase):
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=1)  # Base can be any constant, adjust for different terrains
+                                    base=0)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
