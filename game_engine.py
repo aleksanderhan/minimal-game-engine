@@ -88,12 +88,13 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.scale = 0.5
+        self.scale = 0.2
         self.ground_height = 0
 
         self.chunk_size = 4
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
+        self.current_voxel_world_chunk = None
         self.texture_paths = {
             "stone": "assets/stone.jpeg",
             "grass": "assets/grass.png"
@@ -118,17 +119,79 @@ class GameEngine(ShowBase):
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet)
+        self.accept('f', self.create_and_place_voxel)
         self.accept('r', self.manual_raycast_test)
         self.accept('g', self.toggle_gravity)
 
     def setup_environment(self):
         #build_robot(self.physicsWorld)
         pass
+
+    def create_and_place_voxel(self):
+        raycast_result = self.cast_ray_from_camera()
+
+        scale = 0.5
+        if raycast_result.hasHit():
+            # place voxel on ground or attatch to face of other voxel
+            hit_node = raycast_result.getNode()
+            hit_pos = raycast_result.getHitPos()
+            hit_normal = raycast_result.getHitNormal()
+
+            if hit_node.name == "Terrain":
+                self.create_static_voxel(hit_pos, scale)
+            elif hit_node.name == "Voxel":
+                face_center = self.get_face_center_from_hit(raycast_result, scale)
+                offset = scale / 2
+                self.create_static_voxel(face_center + hit_normal * offset, scale) # static=hit_node.static
+        else:
+            # place voxel in mid air
+            # Calculate the exact position 10 meter in front of the camera
+            forward_vec = self.camera.getQuat().getForward()
+            position = self.camera.getPos() + forward_vec * 10
+            self.create_static_voxel(position, scale)
+
+    def create_static_voxel(self, position: Vec3, voxel_type=1):
+        # Convert global position to chunk coordinates
+        chunk_x = int(position.x) // self.chunk_size
+        chunk_y = int(position.y) // self.chunk_size
+
+        # Convert global position to local voxel coordinates within the chunk
+        voxel_x = int(position.x) % self.chunk_size
+        voxel_y = int(position.y) % self.chunk_size
+        voxel_z = max(int(position.z) - self.ground_height, 0)  # Ensure z is non-negative
+
+        # Retrieve the voxel world for the specified chunk
+        voxel_world = self.get_voxel_world(chunk_x, chunk_y)
+
+        # Check if the z-coordinate is within bounds
+        if 0 <= voxel_z < voxel_world.shape[2]:
+            # Set the voxel type at the calculated local coordinates
+            voxel_world[voxel_x, voxel_y, voxel_z] = voxel_type
+        else:
+            print(f"Voxel z-coordinate {voxel_z} is out of bounds.")
+
+    def get_face_center_from_hit(self, raycast_result, voxel_size=1):
+        hit_normal = raycast_result.getHitNormal()
+        node_path = raycast_result.getNode().getPythonTag("nodePath") 
+        voxel_position = node_path.getPos()  # World position of the voxel's center
+
+        # Calculate face center based on the hit normal
+        if abs(hit_normal.x) > 0.5:  # Hit on X-face
+            face_center = voxel_position + Vec3(hit_normal.x * voxel_size / 2, 0, 0)
+        elif abs(hit_normal.y) > 0.5:  # Hit on Y-face
+            face_center = voxel_position + Vec3(0, hit_normal.y * voxel_size / 2, 0)
+        else:  # Hit on Z-face
+            face_center = voxel_position + Vec3(0, 0, hit_normal.z * voxel_size / 2)
+
+        return face_center
     
     def manual_raycast_test(self):
-        result = self.cast_ray_from_camera(10000)
-        if result.hasHit():
-            print("Hit at:", result.getHitPos())
+        raycast_result = self.cast_ray_from_camera(10000)
+        if raycast_result.hasHit():
+            hit_node = raycast_result.getNode()
+            hit_pos = raycast_result.getHitPos()
+            hit_normal = raycast_result.getHitNormal()
+            print("Hit at:", hit_pos, "normal:", hit_normal, "Node:", hit_node)
         else:
             print("No hit detected.")
 
@@ -175,8 +238,10 @@ class GameEngine(ShowBase):
     def generate_chunk(self, chunk_x, chunk_y):
         voxel_world = self.get_voxel_world(chunk_x, chunk_y)
         
-        vertices, indices = self.create_mesh_data(voxel_world)
-        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
+        vertices, indices = self.create_mesh_data(voxel_world, self.scale)
+        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices, self.scale)
+        if self.args.debug:
+            self.visualize_normals(terrainNP, self.scale)
 
         # Position the flat terrain chunk according to its world coordinates
         world_x = chunk_x * self.chunk_size * self.scale
@@ -260,6 +325,29 @@ class GameEngine(ShowBase):
         normal_writer = GeomVertexWriter(vdata, 'normal')
         color_writer = GeomVertexWriter(vdata, 'color')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
+
+        # Define normals for each face of a voxel
+        normals = [
+            Vec3(0, -1, 0),  # Front face normal
+            Vec3(1, 0, 0),   # Right face normal
+            Vec3(0, 1, 0),   # Back face normal
+            Vec3(-1, 0, 0),  # Left face normal
+            Vec3(0, 0, 1),   # Top face normal
+            Vec3(0, 0, -1)   # Bottom face normal
+        ]
+
+        # Assuming you're mapping one quad (two triangles) per face
+        for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
+            face_index = i // 6 % len(normals)  # Determine which face we're working on
+            normal = normals[face_index]  # Get the normal for this face
+
+            for j in range(6):  # For each vertex in the quad
+                idx = indices[i + j]
+                vertex_writer.addData3f(vertices[idx * 3], vertices[idx * 3 + 1], vertices[idx * 3 + 2])
+                normal_writer.addData3f(normal)  # Add the same normal for all vertices of the face
+
+                # Assuming UV mapping is done here
+                # texcoord_writer.addData2f(...)
 
         # Placeholder for UV mapping logic
         # Assuming two types: type 1 uses the first half, type 2 uses the second half of the atlas
