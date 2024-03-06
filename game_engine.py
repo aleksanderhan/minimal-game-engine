@@ -56,7 +56,7 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self, levels=10):
+    def update_chunks(self, levels=5):
         chunk_x, chunk_y = self.get_player_chunk_pos()
         # Adjust the range to load chunks further out by one additional level
         for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
@@ -92,7 +92,7 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
 
-        self.chunk_size = 4
+        self.chunk_size = 5
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
         self.current_voxel_world_chunk = None
@@ -330,7 +330,6 @@ class GameEngine(ShowBase):
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
         normal_writer = GeomVertexWriter(vdata, 'normal')
-        color_writer = GeomVertexWriter(vdata, 'color')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
         # Define normals for each face of a voxel
@@ -356,29 +355,39 @@ class GameEngine(ShowBase):
                 # Assuming UV mapping is done here
                 # texcoord_writer.addData2f(...)
 
-        # Placeholder for UV mapping logic
+        # Retrieve the mapping as arrays instead of a dict
+        all_vertex_indices, all_voxel_types = self.generate_voxel_type_map_vectorized(voxel_world)
+
         # Assuming two types: type 1 uses the first half, type 2 uses the second half of the atlas
         uv_maps = {
             1: [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],  # UV coordinates for type 1
             2: [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)]   # UV coordinates for type 2
         }
 
-        # Assuming `voxel_type_map` tells us the type of each voxel at each vertex
-        voxel_type_map = self.generate_voxel_type_map(voxel_world) # You need to implement this
-
         tris = GeomTriangles(Geom.UHStatic)
+        vertex_count = 0
         for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
-            for j in range(6):
+            face_index = i // 6 % 6  # There are 6 faces per cube; adjust if your model differs
+            # Get the normal for this face
+            normal = np.array([0, 0, 0])  # Initialize with a default normal; replace with your actual normals
+            
+            for j in range(6):  # For each vertex in the quad
                 idx = indices[i + j]
-                vertex_writer.addData3f(vertices[idx * 3], vertices[idx * 3 + 1], vertices[idx * 3 + 2])
-
-                # Determine voxel type for this vertex, simplified logic
-                voxel_type = voxel_type_map.get(idx, 1)  # Default to type 1 if not found
-                uvs = uv_maps[voxel_type]
-
-                # Assuming a consistent ordering, simplified for illustration
-                u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
+                vertex = vertices[idx * 3: idx * 3 + 3]
+                vertex_writer.addData3f(*vertex)
+                normal_writer.addData3f(*normal)
+                
+                # Determine voxel type for this vertex
+                vertex_index = np.where(all_vertex_indices == vertex_count)[0]
+                if vertex_index.size > 0:
+                    voxel_type = all_voxel_types[vertex_index[0]]
+                else:
+                    voxel_type = 1  # Default to type 1 if not found
+                
+                # Look up UV coordinates based on voxel type
+                u, v = uv_maps[voxel_type][j % 4]
                 texcoord_writer.addData2f(u, v)
+                vertex_count += 1
 
             # Define the two triangles that make up the quad
             tris.addVertices(i, i + 1, i + 2)
@@ -394,40 +403,36 @@ class GameEngine(ShowBase):
         geom_np.reparentTo(self.render)
 
         return geom_np
+
     
-    def generate_voxel_type_map(self, voxel_world):
-        voxel_type_map = {}
+    def generate_voxel_type_map_vectorized(self, voxel_world):
+        non_empty_voxel_indices = np.argwhere(voxel_world > 0)  # Find indices of all non-empty voxels
         
-        # Example logic: Assign types based on the z-coordinate (height) of the voxel
-        # This is a simplification. You may need a more complex logic based on your game's requirements.
-        width, depth, height = voxel_world.shape
-        for x in range(width):
-            for y in range(depth):
-                for z in range(height):
-                    voxel_type = voxel_world[x, y, z]
-                    if voxel_type != 0:  # Assuming 0 is air or no voxel
-                        # Map every vertex in this voxel to its type
-                        # Vertex indices could be calculated or mapped based on your mesh generation logic
-                        # This is a placeholder logic for illustration
-                        vertex_indices = self.get_vertex_indices_for_voxel(x, y, z)
-                        for idx in vertex_indices:
-                            voxel_type_map[idx] = voxel_type
+        # Assuming each voxel generates a fixed number of vertices (e.g., 8 for a cube)
+        # and each vertex has a unique index based on its position in the mesh,
+        # we calculate base indices for the vertices of each voxel.
+        # This operation replaces the get_vertex_indices_for_voxel method.
+        base_indices = non_empty_voxel_indices[:, 0] * self.chunk_size * self.chunk_size * 8 + \
+                    non_empty_voxel_indices[:, 1] * self.chunk_size * 8 + \
+                    non_empty_voxel_indices[:, 2] * 8
         
-        return voxel_type_map
-
-    def get_vertex_indices_for_voxel(self, x, y, z):
-        # Placeholder for mapping voxel coordinates to vertex indices in your mesh
-        # This highly depends on how you're constructing your mesh
-        # For example, if you're adding vertices in a predictable order for each voxel,
-        # you could calculate indices based on the voxel's position and the order of vertices
-        indices = []
-        # Calculate indices based on x, y, z and how vertices are added for each voxel
-        # This is just a conceptual placeholder
-        base_index = (x * self.chunk_size * self.chunk_size + y * self.chunk_size + z) * 8  # Assuming 8 vertices per voxel, for example
-        indices.extend(range(base_index, base_index + 8))  # Adjust based on actual mesh construction
-        return indices
-
-
+        # Expand base indices to cover all vertices generated by each voxel.
+        # For each voxel, we generate 8 vertices, so we create an array of offsets [0, 1, ..., 7]
+        # and add these offsets to each base index.
+        vertex_offsets = np.arange(8)
+        all_vertex_indices = (base_indices[:, np.newaxis] + vertex_offsets).flatten()
+        
+        # Create an array of the same shape as all_vertex_indices, filled with voxel types.
+        # This step assumes a direct mapping from voxel positions to types.
+        voxel_types = voxel_world[non_empty_voxel_indices[:, 0], non_empty_voxel_indices[:, 1], non_empty_voxel_indices[:, 2]]
+        all_voxel_types = np.repeat(voxel_types, 8)  # Repeat each type 8 times, once for each vertex generated by the voxel
+        
+        # Instead of a dictionary, we use two arrays: one for indices (keys) and one for types (values).
+        # This format is more amenable to vectorized operations but differs from the requested dict output.
+        # If a dict is absolutely required, further steps would be needed to convert these arrays into a dict,
+        # which may negate some benefits of vectorization due to the overhead of dictionary creation.
+        
+        return all_vertex_indices, all_voxel_types
 
     def visualize_normals(self, geom_node, scale=0.5):
         """
@@ -461,27 +466,15 @@ class GameEngine(ShowBase):
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
 
-
     @staticmethod
     def create_mesh_data(voxel_world, voxel_size=0.5):
-        vertices = []
-        indices = []
-        index = 0  # Keep track of the last index used
-
-        # Define the offsets for the 8 corners of a cube
-        corner_offsets = [
-            np.array([0, 0, 0]),
-            np.array([1, 0, 0]),
-            np.array([1, 1, 0]),
-            np.array([0, 1, 0]),
-            np.array([0, 0, 1]),
-            np.array([1, 0, 1]),
-            np.array([1, 1, 1]),
-            np.array([0, 1, 1]),
-        ]
+        exposed_faces = GameEngine.identify_exposed_voxels(voxel_world)
         
-        # Adjust the offsets based on the voxel size
-        corner_offsets = [offset * voxel_size for offset in corner_offsets]
+        # Define offsets for the 8 corners of a cube, adjusted by voxel size
+        corner_offsets = np.array([
+            [0, 0, 0], [voxel_size, 0, 0], [voxel_size, voxel_size, 0], [0, voxel_size, 0],
+            [0, 0, voxel_size], [voxel_size, 0, voxel_size], [voxel_size, voxel_size, voxel_size], [0, voxel_size, voxel_size]
+        ])
 
         # Faces defined by indices into the corner_offsets, corresponding to quad vertices
         face_corners = [
@@ -490,32 +483,49 @@ class GameEngine(ShowBase):
             [2, 3, 7, 6],  # Back face
             [3, 0, 4, 7],  # Left face
             [4, 5, 6, 7],  # Top face
-            [0, 3, 2, 1],  # Bottom face
+            [0, 3, 2, 1]   # Bottom face
         ]
 
-        width, length, height = voxel_world.shape
-        for x in range(width):
-            for y in range(length):
-                for z in range(height):
-                    # Check if the voxel is not air
-                    if voxel_world[x, y, z] != 0:
-                        # Iterate over each face to determine if it should be added
-                        for face in face_corners:
-                            # Assume all faces are exposed for simplicity
-                            # Generate vertices for this face
-                            face_vertices = [corner_offsets[corner] + np.array([x, y, z]) * voxel_size for corner in face]
-                            vertices.extend(face_vertices)
-                            
-                            # Add indices for the two triangles that make up this face
-                            indices.extend([index, index+1, index+2, index, index+2, index+3])
-                            index += 4  # Increment the index for the next set of vertices
+        # Initialize vertices and indices lists
+        vertices = []
+        indices = []
 
-        # Convert vertices to a flat list of coordinates
-        vertices_flat = []
-        for vertex in vertices:
-            vertices_flat.extend(vertex)
+        # Iterate only over exposed voxels
+        for x, y, z in np.argwhere(exposed_faces):
+            for face_id, face in enumerate(face_corners):
+                face_vertices = corner_offsets[face] + np.array([x * voxel_size, y * voxel_size, z * voxel_size])
+                vertices.extend(face_vertices.reshape(-1).tolist())
+                base_index = len(vertices) // 3 - 4
+                indices.extend([base_index, base_index + 1, base_index + 2, base_index, base_index + 2, base_index + 3])
 
-        return np.array(vertices_flat, dtype=np.float32), np.array(indices, dtype=np.uint32)
+        vertices_array = np.array(vertices, dtype=np.float32)
+        indices_array = np.array(indices, dtype=np.uint32)
+
+        return vertices_array, indices_array
+
+    @staticmethod
+    def identify_exposed_voxels(voxel_world):
+        # Pad the voxel world with zeros (air) on all sides
+        padded_world = np.pad(voxel_world, pad_width=1, mode='constant', constant_values=0)
+        
+        # Create shifted versions of the world for all six directions
+        shifts = {
+            'left':  (0, -1, 0),
+            'right': (0, 1, 0),
+            'down':  (-1, 0, 0),
+            'up':    (1, 0, 0),
+            'back':  (0, 0, -1),
+            'front': (0, 0, 1),
+        }
+        exposed_faces = np.zeros_like(voxel_world, dtype=bool)
+        
+        for direction, (dx, dy, dz) in shifts.items():
+            shifted_world = np.roll(padded_world, shift=(dx, dy, dz), axis=(0, 1, 2))
+            # Expose face if there's air next to it (voxel value of 0 in the shifted world)
+            exposed_faces |= ((shifted_world[1:-1, 1:-1, 1:-1] == 0) & (voxel_world > 0))
+        
+        return exposed_faces
+
 
 
     def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
