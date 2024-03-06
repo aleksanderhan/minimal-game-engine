@@ -233,11 +233,11 @@ class GameEngine(ShowBase):
             voxel_world = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
+            heightmap = self.generate_flat_height_map(self.chunk_size, height=2) # self.generate_perlin_height_map(chunk_x, chunk_y)
             
             # Populate the voxel world based on the heightmap
-            for x in range(width):
-                for y in range(depth):
+            for y in range(width):
+                for x in range(depth):
                     # Convert heightmap value to an integer height level
                     height = int(heightmap[x, y] * max_height)
                     
@@ -245,6 +245,18 @@ class GameEngine(ShowBase):
                     voxel_world[x, y, :min(height, max_height)] = 1  # Using rock (1) as an example
             
             self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
+            
+            
+            voxel_world = np.array([
+    [[1, 1], [1, 1]],  # Middle layer (z=1)
+    [[0, 0], [0, 0]]   # Top layer (air, z=2)
+])
+            '''
+            voxel_world = np.array([
+    [[1]]
+])
+            '''
+
             return voxel_world
 
         return self.voxel_world_map.get((chunk_x, chunk_y))
@@ -255,10 +267,15 @@ class GameEngine(ShowBase):
         voxel_world = self.get_voxel_world(chunk_x, chunk_y)
         t1 = time.perf_counter()
         vertices, indices = self.create_mesh_data(voxel_world, self.scale)
+        print("vertices", vertices)
+        print("indices", indices)
+
         t2 = time.perf_counter()
         terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
         t3 = time.perf_counter()
-        
+        print(f"Loaded voxel_world for chunk {chunk_x}, {chunk_y} in {t1-t0}")
+        print(f"Created mesh data for chunk {chunk_x}, {chunk_y} in {t2-t1}")
+        print(f"Applied textures for chunk {chunk_x}, {chunk_y} in {t3-t2}")
         if self.args.debug:
             self.visualize_normals(terrainNP, self.scale)
 
@@ -385,8 +402,6 @@ class GameEngine(ShowBase):
             
             for j in range(6):  # For each vertex in the quad
                 idx = indices[i + j]
-                vertex = vertices[idx * 3: idx * 3 + 3]
-                vertex_writer.addData3f(*vertex)
                 normal_writer.addData3f(*normal)
                 
                 # Determine voxel type for this vertex
@@ -480,15 +495,16 @@ class GameEngine(ShowBase):
 
     @staticmethod
     def create_mesh_data(voxel_world, voxel_size):
+        print(voxel_world)
         exposed_voxels = GameEngine.identify_exposed_voxels(voxel_world)
         vertices = []
         indices = []
 
         # Directions for front, back, left, right, top, bottom faces
         directions = [
-            Vec3(0, 0, 1), Vec3(0, 0, -1),
+            Vec3(0, -1, 0), Vec3(0, 1, 0),
             Vec3(-1, 0, 0), Vec3(1, 0, 0),
-            Vec3(0, 1, 0), Vec3(0, -1, 0),
+            Vec3(0, 0, 1), Vec3(0, 0, -1),
         ]
 
         vertex_offsets = [
@@ -506,15 +522,15 @@ class GameEngine(ShowBase):
             [3, 7, 6, 2],  # right
         ]
 
-        for x in range(voxel_world.shape[0]):
+        # Assume voxel_world is indexed as [z][y][x]
+        for z in range(voxel_world.shape[2]):
             for y in range(voxel_world.shape[1]):
-                for z in range(voxel_world.shape[2]):
-                    if not exposed_voxels[x, y, z]:
+                for x in range(voxel_world.shape[0]):
+                    if not exposed_voxels[z][y][x]:
                         continue
-                        
+                    
                     for face_index, direction in enumerate(directions):
                         if GameEngine.is_face_exposed(voxel_world, x, y, z, direction):
-                            # Add vertices for this face
                             for vertex_index in face_vertex_indices[face_index]:
                                 offset = vertex_offsets[vertex_index]
                                 vertices.append([
@@ -524,15 +540,14 @@ class GameEngine(ShowBase):
                                 ])
 
                             base_index = len(vertices) - 4
-                            # Two triangles per face
                             indices.extend([
                                 base_index, base_index + 1, base_index + 2,
                                 base_index, base_index + 2, base_index + 3,
                             ])
-        
-        # Flatten the vertices list for Panda3D
+
         vertices_flat = [item for sublist in vertices for item in sublist]
         return vertices_flat, indices
+
 
     @staticmethod
     def is_face_exposed(voxel_world, x, y, z, direction):
@@ -543,6 +558,9 @@ class GameEngine(ShowBase):
             0 <= adjacent_pos.z < voxel_world.shape[2]):
             return voxel_world[int(adjacent_pos.x), int(adjacent_pos.y), int(adjacent_pos.z)] == 0
         return True  # Exposed if out of bounds
+
+
+
 
 
     @staticmethod
@@ -633,6 +651,13 @@ class GameEngine(ShowBase):
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
 
+        return height_map
+    
+    def generate_flat_height_map(self, board_size, height=0):
+        # Adjust board_size to account for the extra row and column for seamless edges
+        adjusted_size = board_size + 1
+        # Create a 2D NumPy array filled with the specified height value
+        height_map = np.full((adjusted_size, adjusted_size), height)
         return height_map
 
     def setup_crosshair(self):
