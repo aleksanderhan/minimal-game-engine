@@ -38,6 +38,7 @@ from panda3d.core import BitMask32
 from panda3d.bullet import BulletGhostNode
 from scipy.interpolate import interp2d
 from PIL import Image
+import time
 
 random.seed()
 
@@ -62,7 +63,11 @@ class ChunkManager:
         for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
             for y in range(chunk_y - levels, chunk_y + levels):  # Increase the range by one on each side
                 if (x, y) not in self.loaded_chunks:
+                    t0 = time.perf_counter()
                     self.load_chunk(x, y)
+                    dt = time.perf_counter() - t0
+                    print(f"Loaded chunk {x}, {y} in {dt}")
+
         # Adjust the identification of chunks to unload, if necessary
         for chunk_pos in list(self.loaded_chunks.keys()):
             if abs(chunk_pos[0] - chunk_x) > levels or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
@@ -142,7 +147,11 @@ class GameEngine(ShowBase):
             elif hit_node.name == "Voxel":
                 face_center = self.get_face_center_from_hit(raycast_result, self.scale)
                 offset = self.scale / 2
-                self.create_static_voxel(face_center + hit_normal * offset, self.scale) # static=hit_node.static
+                if hit_node.static:
+                    self.create_static_voxel(face_center + hit_normal * offset, self.scale)
+                else:
+                    self.create_dynamic_voxel(face_center + hit_normal * offset, self.scale)
+
         else:
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
@@ -150,7 +159,12 @@ class GameEngine(ShowBase):
             position = self.camera.getPos() + forward_vec * 10
             self.create_static_voxel(position, self.scale)
 
-    def create_static_voxel(self, position: Vec3, voxel_type=1):
+    def create_dynamic_voxel(self, position: Vec3, voxel_type: int=1):
+        # TODO implement
+        pass
+
+
+    def create_static_voxel(self, position: Vec3, voxel_type: int=1):
         # Convert global position to chunk coordinates
         chunk_x = int(position.x) // self.chunk_size
         chunk_y = int(position.y) // self.chunk_size
@@ -161,12 +175,13 @@ class GameEngine(ShowBase):
         voxel_z = max(int(position.z) - self.ground_height, 0)  # Ensure z is non-negative
 
         # Retrieve the voxel world for the specified chunk
-        voxel_world = self.get_voxel_world(chunk_x, chunk_y)
+        voxel_world = self.voxel_world_map.get((chunk_x, chunk_y))
 
         # Check if the z-coordinate is within bounds
         if 0 <= voxel_z < voxel_world.shape[2]:
             # Set the voxel type at the calculated local coordinates
             voxel_world[voxel_x, voxel_y, voxel_z] = voxel_type
+            self.chunk_manager.load_chunk(chunk_x, chunk_y)
         else:
             print(f"Voxel z-coordinate {voxel_z} is out of bounds.")
 
@@ -209,33 +224,26 @@ class GameEngine(ShowBase):
         return self.physicsWorld.rayTestClosest(start_point, end_point)
         
     def get_voxel_world(self, chunk_x, chunk_y):
-        # Dimensions of the voxel world
-        max_height = 10
-        width = self.chunk_size
-        depth = self.chunk_size
-
         if (chunk_x, chunk_y) not in self.voxel_world_map:
+            max_height = 5  # Maximum height of the world
+            width = self.chunk_size
+            depth = self.chunk_size
+            
+            # Initialize an empty voxel world with air (0)
+            voxel_world = np.zeros((width, depth, max_height), dtype=int)
+            
+            # Generate or retrieve heightmap for this chunk
             heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
-
-            # Adjust heightmap shape if necessary
-            heightmap = heightmap[:width, :depth]  # Ensure heightmap dimensions match voxel_world
-
-            # Initialize a 3D numpy array with zeros (air)
-            voxel_world = np.zeros((width, depth, max_height), dtype=np.uint8)
-
-            voxel_world[:, :, 0] = 1  # setting bedrock to be all stone
-
-            # Scale heightmap values to the range [1, max_height-1] and convert to integer
-            scaled_heights = np.clip((heightmap * max_height).astype(int), 1, max_height-1)
-
-            # Ensure the mask dimensions match voxel_world's dimensions
-            x_idx, y_idx = np.indices((width, depth))
-            z_idx = np.arange(max_height)
-            mask = z_idx < scaled_heights[:,:,None]
-
-            # Assign voxel types based on the mask
-            voxel_world[mask] = 1
-
+            
+            # Populate the voxel world based on the heightmap
+            for x in range(width):
+                for y in range(depth):
+                    # Convert heightmap value to an integer height level
+                    height = int(heightmap[x, y] * max_height)
+                    
+                    # Populate voxels up to this height with rock (1), ensuring not to exceed max_height
+                    voxel_world[x, y, :min(height, max_height)] = 1  # Using rock (1) as an example
+            
             self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
             return voxel_world
 
@@ -243,10 +251,14 @@ class GameEngine(ShowBase):
 
         
     def generate_chunk(self, chunk_x, chunk_y):
+        t0 = time.perf_counter()
         voxel_world = self.get_voxel_world(chunk_x, chunk_y)
-        
+        t1 = time.perf_counter()
         vertices, indices = self.create_mesh_data(voxel_world, self.scale)
-        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices, self.scale)
+        t2 = time.perf_counter()
+        terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
+        t3 = time.perf_counter()
+        
         if self.args.debug:
             self.visualize_normals(terrainNP, self.scale)
 
@@ -323,7 +335,7 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
-    def apply_textures_to_voxels(self, voxel_world, vertices, indices, voxel_size=0.5):
+    def apply_textures_to_voxels(self, voxel_world, vertices, indices):
         texture_atlas = self.loader.loadTexture("texture_atlas.png")
         format = GeomVertexFormat.getV3n3cpt2()
         vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
