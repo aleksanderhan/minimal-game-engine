@@ -43,6 +43,7 @@ random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
 loadPrcFileData("", "bullet-enable-contact-events true")
+loadPrcFileData('', 'win-size 1680 1050')
 
 class ChunkManager:
     def __init__(self, game_engine):
@@ -55,7 +56,7 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self, levels=3):
+    def update_chunks(self, levels=10):
         chunk_x, chunk_y = self.get_player_chunk_pos()
         # Adjust the range to load chunks further out by one additional level
         for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
@@ -88,7 +89,7 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.scale = 0.2
+        self.scale = 1
         self.ground_height = 0
 
         self.chunk_size = 4
@@ -130,7 +131,6 @@ class GameEngine(ShowBase):
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
 
-        scale = 0.5
         if raycast_result.hasHit():
             # place voxel on ground or attatch to face of other voxel
             hit_node = raycast_result.getNode()
@@ -138,17 +138,17 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.name == "Terrain":
-                self.create_static_voxel(hit_pos, scale)
+                self.create_static_voxel(hit_pos, self.scale)
             elif hit_node.name == "Voxel":
-                face_center = self.get_face_center_from_hit(raycast_result, scale)
-                offset = scale / 2
-                self.create_static_voxel(face_center + hit_normal * offset, scale) # static=hit_node.static
+                face_center = self.get_face_center_from_hit(raycast_result, self.scale)
+                offset = self.scale / 2
+                self.create_static_voxel(face_center + hit_normal * offset, self.scale) # static=hit_node.static
         else:
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
-            self.create_static_voxel(position, scale)
+            self.create_static_voxel(position, self.scale)
 
     def create_static_voxel(self, position: Vec3, voxel_type=1):
         # Convert global position to chunk coordinates
@@ -214,26 +214,33 @@ class GameEngine(ShowBase):
         width = self.chunk_size
         depth = self.chunk_size
 
-        if self.voxel_world_map.get((chunk_x, chunk_y)) is None:
+        if (chunk_x, chunk_y) not in self.voxel_world_map:
             heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
+
+            # Adjust heightmap shape if necessary
+            heightmap = heightmap[:width, :depth]  # Ensure heightmap dimensions match voxel_world
 
             # Initialize a 3D numpy array with zeros (air)
             voxel_world = np.zeros((width, depth, max_height), dtype=np.uint8)
 
-            voxel_world[:, :, 0] = 1 # setting bedrock to be all ground
+            voxel_world[:, :, 0] = 1  # setting bedrock to be all stone
 
-            # Fill the voxel world based on the heightmap
-            for x in range(width):
-                for y in range(depth):
-                    ground_height = int(heightmap[x, y] * max_height)
-                    for z in range(1, ground_height-1):
-                        # Randomly choose between two types of ground (1 or 2)
-                        voxel_world[x, y, z] = np.random.choice([1, 2], p=[0.5, 0.5])
+            # Scale heightmap values to the range [1, max_height-1] and convert to integer
+            scaled_heights = np.clip((heightmap * max_height).astype(int), 1, max_height-1)
+
+            # Ensure the mask dimensions match voxel_world's dimensions
+            x_idx, y_idx = np.indices((width, depth))
+            z_idx = np.arange(max_height)
+            mask = z_idx < scaled_heights[:,:,None]
+
+            # Assign voxel types based on the mask
+            voxel_world[mask] = 1
 
             self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
             return voxel_world
 
         return self.voxel_world_map.get((chunk_x, chunk_y))
+
         
     def generate_chunk(self, chunk_x, chunk_y):
         voxel_world = self.get_voxel_world(chunk_x, chunk_y)
