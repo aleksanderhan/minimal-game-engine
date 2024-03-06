@@ -97,7 +97,7 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
 
-        self.chunk_size = 5
+        self.chunk_size = 3
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
         self.current_voxel_world_chunk = None
@@ -233,7 +233,8 @@ class GameEngine(ShowBase):
             voxel_world = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            heightmap = self.generate_flat_height_map(self.chunk_size, height=2) # self.generate_perlin_height_map(chunk_x, chunk_y)
+            heightmap = self.generate_flat_height_map(self.chunk_size, height=1)
+            #heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
             
             # Populate the voxel world based on the heightmap
             for y in range(width):
@@ -246,16 +247,6 @@ class GameEngine(ShowBase):
             
             self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
             
-            
-            voxel_world = np.array([
-    [[1, 1], [1, 1]],  # Middle layer (z=1)
-    [[0, 0], [0, 0]]   # Top layer (air, z=2)
-])
-            '''
-            voxel_world = np.array([
-    [[1]]
-])
-            '''
 
             return voxel_world
 
@@ -495,74 +486,39 @@ class GameEngine(ShowBase):
 
     @staticmethod
     def create_mesh_data(voxel_world, voxel_size):
-        print(voxel_world)
-        exposed_voxels = GameEngine.identify_exposed_voxels(voxel_world)
+        exposed_faces = GameEngine.identify_exposed_voxels(voxel_world)
         vertices = []
         indices = []
 
-        # Directions for front, back, left, right, top, bottom faces
-        directions = [
-            Vec3(0, -1, 0), Vec3(0, 1, 0),
-            Vec3(-1, 0, 0), Vec3(1, 0, 0),
-            Vec3(0, 0, 1), Vec3(0, 0, -1),
+        voxel_offset = [
+            [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],  # Front face
+            [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]],  # Back face
+            [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]],  # Left face
+            [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]],  # Right face
+            [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],  # Top face
+            [[0, 0, 1], [0, 0, 0], [1, 0, 0], [1, 0, 1]]   # Bottom face
         ]
 
-        vertex_offsets = [
-            [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
-            [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],
-        ]
-
-        # Map each face direction to its corresponding vertex indices
-        face_vertex_indices = [
-            [4, 5, 6, 7],  # top
-            [0, 1, 2, 3],  # bottom
-            [0, 4, 7, 3],  # front
-            [1, 5, 6, 2],  # back
-            [0, 4, 5, 1],  # left
-            [3, 7, 6, 2],  # right
-        ]
-
-        # Assume voxel_world is indexed as [z][y][x]
+        index_offset = len(vertices) // 3
         for z in range(voxel_world.shape[2]):
             for y in range(voxel_world.shape[1]):
                 for x in range(voxel_world.shape[0]):
-                    if not exposed_voxels[z][y][x]:
+                    if not exposed_faces[x, y, z]:
                         continue
-                    
-                    for face_index, direction in enumerate(directions):
-                        if GameEngine.is_face_exposed(voxel_world, x, y, z, direction):
-                            for vertex_index in face_vertex_indices[face_index]:
-                                offset = vertex_offsets[vertex_index]
-                                vertices.append([
-                                    (x + offset[0]) * voxel_size,
-                                    (y + offset[1]) * voxel_size,
-                                    (z + offset[2]) * voxel_size,
-                                ])
 
-                            base_index = len(vertices) - 4
-                            indices.extend([
-                                base_index, base_index + 1, base_index + 2,
-                                base_index, base_index + 2, base_index + 3,
-                            ])
+                    voxel_pos = np.array([x, y, z]) * voxel_size
+                    # Generate vertices and indices for each exposed face
+                    for face_vertices in voxel_offset:
+                        face_indices = [index_offset + i for i in range(4)]
+                        indices.extend([face_indices[0], face_indices[1], face_indices[2], face_indices[0], face_indices[2], face_indices[3]])
+                        for offset in face_vertices:
+                            vertex_position = voxel_pos + np.array(offset) * voxel_size
+                            vertices.extend(vertex_position)
+                        index_offset += 4
 
-        vertices_flat = [item for sublist in vertices for item in sublist]
-        return vertices_flat, indices
+        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
 
-
-    @staticmethod
-    def is_face_exposed(voxel_world, x, y, z, direction):
-        # Check if the adjacent voxel in the given direction is air (0) or out of bounds
-        adjacent_pos = Vec3(x, y, z) + direction
-        if (0 <= adjacent_pos.x < voxel_world.shape[0] and
-            0 <= adjacent_pos.y < voxel_world.shape[1] and
-            0 <= adjacent_pos.z < voxel_world.shape[2]):
-            return voxel_world[int(adjacent_pos.x), int(adjacent_pos.y), int(adjacent_pos.z)] == 0
-        return True  # Exposed if out of bounds
-
-
-
-
-
+        
     @staticmethod
     def identify_exposed_voxels(voxel_world):
         """
