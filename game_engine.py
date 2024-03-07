@@ -233,8 +233,8 @@ class GameEngine(ShowBase):
             voxel_world = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            heightmap = self.generate_flat_height_map(self.chunk_size, height=1)
-            #heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
+            #heightmap = self.generate_flat_height_map(self.chunk_size, height=1)
+            heightmap = self.generate_perlin_height_map(chunk_x, chunk_y)
             
             # Populate the voxel world based on the heightmap
             for y in range(width):
@@ -518,7 +518,9 @@ class GameEngine(ShowBase):
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
 
+    
         
+    
     @staticmethod
     def identify_exposed_voxels(voxel_world):
         """
