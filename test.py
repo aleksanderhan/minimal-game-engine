@@ -22,10 +22,37 @@ def identify_exposed_voxels(voxel_world):
     
     return exposed_faces
 
+def check_surrounding_air_vectorized(voxel_world, x, y, z):
+    """
+    Vectorized version to check each of the six directions around a point (x, y, z) in the voxel world
+    for air (assumed to be represented by 0).
+    """
+    # Pad the voxel world with 1 (solid) to handle edge cases without manual boundary checks
+    padded_world = np.pad(voxel_world, pad_width=1, mode='constant', constant_values=0)
 
-voxel_world = np.array([[[1, 1, 1], [1, 1, 1], [1, 1, 1]], [[0, 0, 0], [0, 1, 0], [0, 0, 0]]])
+    # Adjust coordinates due to padding
+    x, y, z = x + 1, y + 1, z + 1
 
+    # Check the six directions around the point for air, vectorized
+    left = padded_world[x - 1, y, z] == 0
+    right = padded_world[x + 1, y, z] == 0
+    down = padded_world[x, y - 1, z] == 0
+    up = padded_world[x, y + 1, z] == 0
+    front = padded_world[x, y, z - 1] == 0
+    back = padded_world[x, y, z + 1] == 0
+
+    faces = ["left", "right", "down", "up", "front", "back"]
+    exposed = [back, front, down, up, right, left]
+    
+    return [face for face, exp in zip(faces, exposed) if exp]
+
+voxel_world = np.zeros((3, 3, 3), dtype=int)
+voxel_world[1, 1, 1] = 1
 
 voxels = identify_exposed_voxels(voxel_world)
 
 print(voxels)
+
+
+
+print(check_surrounding_air_vectorized(voxel_world, 1, 1, 1))

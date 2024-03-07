@@ -382,21 +382,10 @@ class GameEngine(ShowBase):
         normal_writer = GeomVertexWriter(vdata, 'normal')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
-        voxel_type_texcoords = {
-            0: [(0.0, 0.5), (0.0, 0.0), (0.5, 0.0), (0.5, 0.5)],  # Left half of texture atlas
-            1: [(0.5, 0.5), (0.5, 0.0), (1.0, 0.0), (1.0, 0.5)]   # Right half of texture atlas
-        }
-
-        # Correct loop to handle 8 components per vertex (x, y, z, nx, ny, nz, u, v)
-        for vertex in vertices.reshape(-1, 8):  # Adjust the reshape to account for 8 components per vertex
-            x, y, z, nx, ny, nz, u, v = vertex  # Unpack all components, including texture coordinates
-            #print(f"Vertex {i}: Position ({x}, {y}, {z}), Normal ({nx}, {ny}, {nz}), TexCoords ({u}, {v})")
-            vertex_writer.addData3f(x, y, z)
-            normal_writer.addData3f(nx, ny, nz)
-
-            voxel_type = self.get_voxel_type(x, y, z)
-            for i, tex_coord in enumerate(voxel_type_texcoords[voxel_type]):
-                texcoord_writer.addData2f(*tex_coord)
+        for i in range(0, len(vertices), 8):  # 8 components per vertex: 3 position, 3 normal, 2 texcoord
+            vertex_writer.addData3f(vertices[i], vertices[i+1], vertices[i+2])
+            normal_writer.addData3f(vertices[i+3], vertices[i+4], vertices[i+5])
+            texcoord_writer.addData2f(vertices[i+6], vertices[i+7])
 
         # Create triangles using indices
         tris = GeomTriangles(Geom.UHStatic)
@@ -411,6 +400,7 @@ class GameEngine(ShowBase):
         geom_node.addGeom(geom)
         geom_np = NodePath(geom_node)
         #geom_np.setTexture(texture_atlas)
+        geom_np.setColor(1, 0, 0, 1)
         geom_np.reparentTo(self.render)
 
         return geom_np
@@ -481,8 +471,8 @@ class GameEngine(ShowBase):
         front = padded_world[x, y, z - 1] == 0
         back = padded_world[x, y, z + 1] == 0
 
-        faces = ["left", "right", "down", "up", "front", "back"]
-        exposed = [left, right, down, up, front, back]
+        faces = ["left", "right", "down", "up", "back", "front"]
+        exposed = [left, right, down, up, back, front]
         
         return [face for face, exp in zip(faces, exposed) if exp]
 
@@ -533,9 +523,7 @@ class GameEngine(ShowBase):
                 #print("exposed_faces", exposed_faces)
                 for face_name, offset in face_offsets.items():
                     if face_name in exposed_faces:
-                        dx = offset[0]
-                        dy = offset[1]
-                        dz = offset[2]
+                        dx, dy, dz = offset
 
                         # Generate vertices for this face
                         face_vertices, face_normals = GameEngine.generate_face_vertices(x, y, z, dx, dy, dz, voxel_size)
@@ -548,8 +536,9 @@ class GameEngine(ShowBase):
                             vertices.extend([*fv, *fn, u, v])
                         
                         # Create indices for two triangles making up the face
-                        indices.extend([index_counter, index_counter+1, index_counter+2, index_counter, index_counter+2, index_counter+3])
-                        index_counter += 4
+                        for i in range(int(len(face_vertices)/6)):
+                            indices.append(index_counter + i)
+                            index_counter += 1
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
@@ -567,25 +556,10 @@ class GameEngine(ShowBase):
             face_vertices: A 4x3 array of vertex positions for the face.
             face_normals: A 4x3 array of normals for the face, all identical.
         """
-        half = voxel_size / 2
+        # TODO: implement a method that generates the vertices for use in
+        # a panda3d GeomVertexWriter
 
-        # Calculate the center of the face
-        cx = x + half + dx * half
-        cy = y + half + dy * half
-        cz = z + half + dz * half
 
-        # Calculate the four corners of the face
-        corners = [
-            (cx - half * abs(dy) - half * abs(dz), cy - half * abs(dx) - half * abs(dz), cz - half * abs(dx) - half * abs(dy)),
-            (cx + half * abs(dy) + half * abs(dz), cy - half * abs(dx) - half * abs(dz), cz - half * abs(dx) - half * abs(dy)),
-            (cx + half * abs(dy) + half * abs(dz), cy + half * abs(dx) + half * abs(dz), cz + half * abs(dx) + half * abs(dy)),
-            (cx - half * abs(dy) - half * abs(dz), cy + half * abs(dx) + half * abs(dz), cz + half * abs(dx) + half * abs(dy))
-        ]
-
-        # The normal will be the same for all vertices on the face
-        face_normals = [(dx, dy, dz)] * 4
-
-        return corners, face_normals
 
     
     @staticmethod
@@ -671,7 +645,7 @@ class GameEngine(ShowBase):
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=1)  # Base can be any constant, adjust for different terrains
+                                    base=0)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
