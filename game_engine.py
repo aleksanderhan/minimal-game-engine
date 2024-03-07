@@ -45,6 +45,7 @@ random.seed()
 loadPrcFileData("", "load-file-type p3assimp")
 loadPrcFileData("", "bullet-enable-contact-events true")
 loadPrcFileData('', 'win-size 1680 1050')
+loadPrcFileData("", "threading-model Cull/Draw")
 
 class ChunkManager:
     def __init__(self, game_engine):
