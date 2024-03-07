@@ -58,7 +58,7 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self, levels=3):
+    def update_chunks(self, levels=0):
         chunk_x, chunk_y = self.get_player_chunk_pos()
 
         if levels == 0:
@@ -112,7 +112,7 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
 
-        self.chunk_size = 24
+        self.chunk_size = 10
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
         self.texture_paths = {
@@ -259,9 +259,12 @@ class GameEngine(ShowBase):
                     # Populate voxels up to this height with rock (1), ensuring not to exceed max_height
                     voxel_world[x, y, :min(height, max_height)] = 1  # Using rock (1) as an example
             
-            self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
             
-            #voxel_world = np.array([[[1]]])
+            voxel_world = np.zeros((3, 3, 3), dtype=int)
+            voxel_world[1, 1, 1] = 1
+            
+            self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
+
             return voxel_world
 
         return self.voxel_world_map.get((chunk_x, chunk_y))
@@ -441,7 +444,7 @@ class GameEngine(ShowBase):
         
         # Create a LineSegs object to hold the lines
         lines = LineSegs()
-        lines.setThickness(1.0)
+        lines.setThickness(2.0)
         lines.setColor(1, 0, 0, 1)  # Red color for visibility
 
         # Iterate through the geometry to get vertex positions and normals
@@ -508,12 +511,12 @@ class GameEngine(ShowBase):
         # Example texture coordinates for each face, adjust as needed for your texture atlas
         # These are placeholders and should be modified according to how your textures are mapped
         texcoords = {
-            'left': (0, 0),
-            'right': (1, 0),
-            'down': (0, 1),
-            'up': (1, 1),
-            'back': (0.5, 0),
-            'front': (0.5, 1),
+            'left': (0.25, 0.5),  # Averages the left texture's UVs
+            'right': (0.75, 0.5), # Averages the right texture's UVs
+            'down': (0.25, 0.5),  # Could also map to either texture's average
+            'up': (0.75, 0.5),    # Another example, mapping to the right
+            'back': (0.25, 0.5),  # Averages for left texture's UVs
+            'front': (0.75, 0.5), # Averages for right texture's UVs
         }
 
         # Define offsets for each face (adjust based on your coordinate system)
@@ -591,7 +594,7 @@ class GameEngine(ShowBase):
 
         # The normal is the same for all vertices of this face
         face_normals = np.tile([dx, dy, dz], (4, 1))
-
+        print(f"Normal for face ({dx}, {dy}, {dz}):", face_normals)
         return np.array(face_vertices), face_normals
 
     
