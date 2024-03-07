@@ -361,6 +361,19 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
+    @staticmethod
+    def rotate_normal_90_deg(nx, ny, nz, axis='z'):
+        if axis == 'x':
+            # Rotate around the X-axis
+            return nx, -nz, ny
+        elif axis == 'y':
+            # Rotate around the Y-axis
+            return nz, ny, -nx
+        elif axis == 'z':
+            # Rotate around the Z-axis
+            return -ny, nx, nz
+        else:
+            return nx, ny, nz  # No rotation if the axis is not recognized
 
     def apply_textures_to_voxels(self, voxel_world, vertices, indices):
         texture_atlas = self.loader.loadTexture("texture_atlas.png")
@@ -372,14 +385,12 @@ class GameEngine(ShowBase):
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
         # Correct loop to handle 8 components per vertex (x, y, z, nx, ny, nz, u, v)
-        i = 0
         for vertex in vertices.reshape(-1, 8):  # Adjust the reshape to account for 8 components per vertex
             x, y, z, nx, ny, nz, u, v = vertex  # Unpack all components, including texture coordinates
             #print(f"Vertex {i}: Position ({x}, {y}, {z}), Normal ({nx}, {ny}, {nz}), TexCoords ({u}, {v})")
             vertex_writer.addData3f(x, y, z)
             normal_writer.addData3f(nx, ny, nz)
-            texcoord_writer.addData2f(u, v)
-            i += 1
+            texcoord_writer.addData2f(v, u)
 
         # Create triangles using indices
         tris = GeomTriangles(Geom.UHStatic)
@@ -572,30 +583,25 @@ class GameEngine(ShowBase):
             face_vertices: A 4x3 array of vertex positions for the face.
             face_normals: A 4x3 array of normals for the face, all identical.
         """
-        # Offset each vertex by half the voxel size to get corner positions
-        half_size = voxel_size / 2
-        offsets = [
-            (-half_size, -half_size, half_size),
-            (half_size, -half_size, half_size),
-            (half_size, half_size, half_size),
-            (-half_size, half_size, half_size)
+        half = voxel_size / 2
+
+        # Calculate the center of the face
+        cx = x + half + dx * half
+        cy = y + half + dy * half
+        cz = z + half + dz * half
+
+        # Calculate the four corners of the face
+        corners = [
+            (cx - half * abs(dy) - half * abs(dz), cy - half * abs(dx) - half * abs(dz), cz - half * abs(dx) - half * abs(dy)),
+            (cx + half * abs(dy) + half * abs(dz), cy - half * abs(dx) - half * abs(dz), cz - half * abs(dx) - half * abs(dy)),
+            (cx + half * abs(dy) + half * abs(dz), cy + half * abs(dx) + half * abs(dz), cz + half * abs(dx) + half * abs(dy)),
+            (cx - half * abs(dy) - half * abs(dz), cy + half * abs(dx) + half * abs(dz), cz + half * abs(dx) + half * abs(dy))
         ]
 
-        # Adjust offsets based on face direction
-        if dx:
-            offsets = [(oz * dx, oy, ox) for ox, oy, oz in offsets]
-        elif dy:
-            offsets = [(ox, oz * dy, oy) for ox, oy, oz in offsets]
-        # dz case is the default orientation
+        # The normal will be the same for all vertices on the face
+        face_normals = [(dx, dy, dz)] * 4
 
-        # Calculate vertex positions
-        base_pos = np.array([x, y, z]) * voxel_size + half_size  # Center position of the voxel
-        face_vertices = [base_pos + np.array(offset) for offset in offsets]
-
-        # The normal is the same for all vertices of this face
-        face_normals = np.tile([dx, dy, dz], (4, 1))
-        print(f"Normal for face ({dx}, {dy}, {dz}):", face_normals)
-        return np.array(face_vertices), face_normals
+        return corners, face_normals
 
     
     @staticmethod
