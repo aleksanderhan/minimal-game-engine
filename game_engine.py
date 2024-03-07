@@ -58,8 +58,22 @@ class ChunkManager:
         chunk_y = int(player_pos.y) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
-    def update_chunks(self, levels=5):
+    def update_chunks(self, levels=3):
         chunk_x, chunk_y = self.get_player_chunk_pos()
+
+        if levels == 0:
+            if (chunk_x, chunk_y) not in self.loaded_chunks:
+                t0 = time.perf_counter()
+                self.load_chunk(chunk_x, chunk_y)
+                dt = time.perf_counter() - t0
+                print(f"Loaded chunk {chunk_x}, {chunk_y} in {dt}")
+        
+            for chunk_pos in list(self.loaded_chunks.keys()):
+                if abs(chunk_pos[0] - chunk_x) > levels or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
+                    self.unload_chunk(*chunk_pos)
+
+            return
+
         # Adjust the range to load chunks further out by one additional level
         for x in range(chunk_x - levels, chunk_x + levels):  # Increase the range by one on each side
             for y in range(chunk_y - levels, chunk_y + levels):  # Increase the range by one on each side
@@ -98,10 +112,9 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
 
-        self.chunk_size = 3
+        self.chunk_size = 24
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
-        self.current_voxel_world_chunk = None
         self.texture_paths = {
             "stone": "assets/stone.jpeg",
             "grass": "assets/grass.png"
@@ -248,7 +261,7 @@ class GameEngine(ShowBase):
             
             self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
             
-
+            #voxel_world = np.array([[[1]]])
             return voxel_world
 
         return self.voxel_world_map.get((chunk_x, chunk_y))
@@ -258,9 +271,10 @@ class GameEngine(ShowBase):
         t0 = time.perf_counter()
         voxel_world = self.get_voxel_world(chunk_x, chunk_y)
         t1 = time.perf_counter()
+        #print("voxel_world", voxel_world)
         vertices, indices = self.create_mesh_data(voxel_world, self.scale)
-        print("vertices", vertices)
-        print("indices", indices)
+        #print("vertices", vertices)
+        #print("indices", indices)
 
         t2 = time.perf_counter()
         terrainNP = self.apply_textures_to_voxels(voxel_world, vertices, indices)
@@ -344,73 +358,31 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
+
     def apply_textures_to_voxels(self, voxel_world, vertices, indices):
         texture_atlas = self.loader.loadTexture("texture_atlas.png")
-        format = GeomVertexFormat.getV3n3cpt2()
+        format = GeomVertexFormat.getV3n3t2()  # Ensure format includes texture coordinates
         vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
         normal_writer = GeomVertexWriter(vdata, 'normal')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
-        # Define normals for each face of a voxel
-        normals = [
-            Vec3(0, -1, 0),  # Front face normal
-            Vec3(1, 0, 0),   # Right face normal
-            Vec3(0, 1, 0),   # Back face normal
-            Vec3(-1, 0, 0),  # Left face normal
-            Vec3(0, 0, 1),   # Top face normal
-            Vec3(0, 0, -1)   # Bottom face normal
-        ]
+        # Correct loop to handle 8 components per vertex (x, y, z, nx, ny, nz, u, v)
+        i = 0
+        for vertex in vertices.reshape(-1, 8):  # Adjust the reshape to account for 8 components per vertex
+            x, y, z, nx, ny, nz, u, v = vertex  # Unpack all components, including texture coordinates
+            #print(f"Vertex {i}: Position ({x}, {y}, {z}), Normal ({nx}, {ny}, {nz}), TexCoords ({u}, {v})")
+            vertex_writer.addData3f(x, y, z)
+            normal_writer.addData3f(nx, ny, nz)
+            texcoord_writer.addData2f(u, v)
+            i += 1
 
-        # Assuming you're mapping one quad (two triangles) per face
-        for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
-            face_index = i // 6 % len(normals)  # Determine which face we're working on
-            normal = normals[face_index]  # Get the normal for this face
-
-            for j in range(6):  # For each vertex in the quad
-                idx = indices[i + j]
-                vertex_writer.addData3f(vertices[idx * 3], vertices[idx * 3 + 1], vertices[idx * 3 + 2])
-                normal_writer.addData3f(normal)  # Add the same normal for all vertices of the face
-
-                # Assuming UV mapping is done here
-                # texcoord_writer.addData2f(...)
-
-        # Retrieve the mapping as arrays instead of a dict
-        all_vertex_indices, all_voxel_types = self.generate_voxel_type_map_vectorized(voxel_world)
-
-        # Assuming two types: type 1 uses the first half, type 2 uses the second half of the atlas
-        uv_maps = {
-            1: [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],  # UV coordinates for type 1
-            2: [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)]   # UV coordinates for type 2
-        }
-
+        # Create triangles using indices
         tris = GeomTriangles(Geom.UHStatic)
-        vertex_count = 0
-        for i in range(0, len(indices), 6):  # 6 indices per quad (two triangles)
-            face_index = i // 6 % 6  # There are 6 faces per cube; adjust if your model differs
-            # Get the normal for this face
-            normal = normals[face_index]  # Initialize with a default normal; replace with your actual normals
-            
-            for j in range(6):  # For each vertex in the quad
-                idx = indices[i + j]
-                normal_writer.addData3f(*normal)
-                
-                # Determine voxel type for this vertex
-                vertex_index = np.where(all_vertex_indices == vertex_count)[0]
-                if vertex_index.size > 0:
-                    voxel_type = all_voxel_types[vertex_index[0]]
-                else:
-                    voxel_type = 1  # Default to type 1 if not found
-                
-                # Look up UV coordinates based on voxel type
-                u, v = uv_maps[voxel_type][j % 4]
-                texcoord_writer.addData2f(u, v)
-                vertex_count += 1
-
-            # Define the two triangles that make up the quad
-            tris.addVertices(i, i + 1, i + 2)
-            tris.addVertices(i + 3, i + 4, i + 5)
+        for i in range(0, len(indices), 3):
+            tris.addVertices(indices[i], indices[i+1], indices[i+2])
+        tris.closePrimitive()
 
         geom = Geom(vdata)
         geom.addPrimitive(tris)
@@ -422,6 +394,9 @@ class GameEngine(ShowBase):
         geom_np.reparentTo(self.render)
 
         return geom_np
+
+
+                    
 
     
     def generate_voxel_type_map_vectorized(self, voxel_world):
@@ -486,41 +461,139 @@ class GameEngine(ShowBase):
         lines_np.reparentTo(self.render)
 
     @staticmethod
-    def create_mesh_data(voxel_world, voxel_size):
-        exposed_faces = GameEngine.identify_exposed_voxels(voxel_world)
+    def check_surrounding_air_vectorized(voxel_world, x, y, z):
+        """
+        Vectorized version to check each of the six directions around a point (x, y, z) in the voxel world
+        for air (assumed to be represented by 0).
+        """
+        # Pad the voxel world with 1 (solid) to handle edge cases without manual boundary checks
+        padded_world = np.pad(voxel_world, pad_width=1, mode='constant', constant_values=0)
+
+        # Adjust coordinates due to padding
+        x, y, z = x + 1, y + 1, z + 1
+
+        # Check the six directions around the point for air, vectorized
+        left = padded_world[x - 1, y, z] == 0
+        right = padded_world[x + 1, y, z] == 0
+        down = padded_world[x, y - 1, z] == 0
+        up = padded_world[x, y + 1, z] == 0
+        front = padded_world[x, y, z - 1] == 0
+        back = padded_world[x, y, z + 1] == 0
+
+        faces = ["left", "right", "down", "up", "front", "back"]
+        exposed = [left, right, down, up, front, back]
+        
+        return [face for face, exp in zip(faces, exposed) if exp]
+
+
+    def create_mesh_data(self, voxel_world, voxel_size):
+        """Efficiently creates mesh data for exposed voxel faces.
+
+        Args:
+            voxel_world: 3D NumPy array representing voxel types.
+            voxel_size: The size of each voxel in world units.
+
+        Returns:
+                vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
+                indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
+        """
+
+        exposed_voxels = GameEngine.identify_exposed_voxels(voxel_world)
+        #print("exposed_voxels", exposed_voxels)
+
         vertices = []
         indices = []
+        index_counter = 0  # Track indices for each exposed face
 
-        voxel_offset = [
-            [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]],  # Front face
-            [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]],  # Back face
-            [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]],  # Left face
-            [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]],  # Right face
-            [[0, 1, 0], [0, 1, 1], [1, 1, 1], [1, 1, 0]],  # Top face
-            [[0, 0, 1], [0, 0, 0], [1, 0, 0], [1, 0, 1]]   # Bottom face
-        ]
+        # Example texture coordinates for each face, adjust as needed for your texture atlas
+        # These are placeholders and should be modified according to how your textures are mapped
+        texcoords = {
+            'left': (0, 0),
+            'right': (1, 0),
+            'down': (0, 1),
+            'up': (1, 1),
+            'back': (0.5, 0),
+            'front': (0.5, 1),
+        }
 
-        index_offset = len(vertices) // 3
-        for z in range(voxel_world.shape[2]):
-            for y in range(voxel_world.shape[1]):
-                for x in range(voxel_world.shape[0]):
-                    if not exposed_faces[x, y, z]:
-                        continue
+        # Define offsets for each face (adjust based on your coordinate system)
+        face_offsets = {
+            'left':   (-self.scale,  0,  0),
+            'right':  ( self.scale,  0,  0),
+            'down':   ( 0, -self.scale,  0),
+            'up':     ( 0,  self.scale,  0),
+            'back':   ( 0,  0, -self.scale),
+            'front':  ( 0,  0,  self.scale),
+        }
 
-                    voxel_pos = np.array([x, y, z]) * voxel_size
-                    # Generate vertices and indices for each exposed face
-                    for face_vertices in voxel_offset:
-                        face_indices = [index_offset + i for i in range(4)]
-                        indices.extend([face_indices[0], face_indices[1], face_indices[2], face_indices[0], face_indices[2], face_indices[3]])
-                        for offset in face_vertices:
-                            vertex_position = voxel_pos + np.array(offset) * voxel_size
-                            vertices.extend(vertex_position)
-                        index_offset += 4
+        for x, y, z in np.ndindex(exposed_voxels.shape):
+            if exposed_voxels[x, y, z]:
+                exposed_faces = GameEngine.check_surrounding_air_vectorized(voxel_world, x, y, z)
+                #print("exposed_faces", exposed_faces)
+                for face_name, offset in face_offsets.items():
+                    if face_name in exposed_faces:
+                        dx = offset[0]
+                        dy = offset[1]
+                        dz = offset[2]
+
+                        # Generate vertices for this face
+                        face_vertices, face_normals = GameEngine.generate_face_vertices(x, y, z, dx, dy, dz, voxel_size)
+                        u, v = texcoords[face_name]
+                        #print("face_vertices", face_vertices)
+                        #print("face_normals", face_normals)
+
+                        # Append generated vertices, normals, and texture coordinates to the list
+                        for fv, fn in zip(face_vertices, face_normals):
+                            vertices.extend([*fv, *fn, u, v])
+
+                        # Append generated vertices and normals to the lists
+                        #vertices.extend(np.column_stack((face_vertices, face_normals)).flatten())
+                        
+                        # Create indices for two triangles making up the face
+                        indices.extend([index_counter, index_counter+1, index_counter+2, index_counter, index_counter+2, index_counter+3])
+                        index_counter += 4
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
-
     
-        
+    @staticmethod
+    def generate_face_vertices(x, y, z, dx, dy, dz, voxel_size):
+        """
+        Generates vertices and normals for a given voxel face.
+
+        Args:
+            x, y, z: Coordinates of the voxel in the voxel grid.
+            dx, dy, dz: Direction vector of the face (e.g., (0, 0, 1) for the top face).
+            voxel_size: Size of the voxel.
+
+        Returns:
+            face_vertices: A 4x3 array of vertex positions for the face.
+            face_normals: A 4x3 array of normals for the face, all identical.
+        """
+        # Offset each vertex by half the voxel size to get corner positions
+        half_size = voxel_size / 2
+        offsets = [
+            (-half_size, -half_size, half_size),
+            (half_size, -half_size, half_size),
+            (half_size, half_size, half_size),
+            (-half_size, half_size, half_size)
+        ]
+
+        # Adjust offsets based on face direction
+        if dx:
+            offsets = [(oz * dx, oy, ox) for ox, oy, oz in offsets]
+        elif dy:
+            offsets = [(ox, oz * dy, oy) for ox, oy, oz in offsets]
+        # dz case is the default orientation
+
+        # Calculate vertex positions
+        base_pos = np.array([x, y, z]) * voxel_size + half_size  # Center position of the voxel
+        face_vertices = [base_pos + np.array(offset) for offset in offsets]
+
+        # The normal is the same for all vertices of this face
+        face_normals = np.tile([dx, dy, dz], (4, 1))
+
+        return np.array(face_vertices), face_normals
+
     
     @staticmethod
     def identify_exposed_voxels(voxel_world):
@@ -556,18 +629,18 @@ class GameEngine(ShowBase):
 
     def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
+        
+        # Loop through the indices to get triangles. Since vertices now include texture coords,
+        # extract only the position data (first three components) for BulletPhysics.
         for i in range(0, len(indices), 3):
-            idx0, idx1, idx2 = indices[i], indices[i+1], indices[i+2]
-            # Retrieve each vertex as a triplet (x, y, z)
-            v0 = vertices[idx0*3:idx0*3+3]  # Fetches the x, y, z components of the vertex
-            v1 = vertices[idx1*3:idx1*3+3]
-            v2 = vertices[idx2*3:idx2*3+3]
+            idx0, idx1, idx2 = indices[i] * 8, indices[i+1] * 8, indices[i+2] * 8
             
-            # Convert numpy arrays to lists if necessary
-            v0 = v0.tolist() if isinstance(v0, np.ndarray) else v0
-            v1 = v1.tolist() if isinstance(v1, np.ndarray) else v1
-            v2 = v2.tolist() if isinstance(v2, np.ndarray) else v2
-
+            # Extract the position data from the flattened vertices array.
+            v0 = vertices[idx0:idx0+3]  # Extracts x, y, z for vertex 0
+            v1 = vertices[idx1:idx1+3]  # Extracts x, y, z for vertex 1
+            v2 = vertices[idx2:idx2+3]  # Extracts x, y, z for vertex 2
+            
+            # Add the triangle to the mesh.
             terrainMesh.addTriangle(Vec3(*v0), Vec3(*v1), Vec3(*v2))
 
         terrainShape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
@@ -605,7 +678,7 @@ class GameEngine(ShowBase):
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=0)  # Base can be any constant, adjust for different terrains
+                                    base=1)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
