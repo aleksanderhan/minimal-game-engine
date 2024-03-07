@@ -272,8 +272,8 @@ class GameEngine(ShowBase):
                     voxel_world[x, y, :min(height, max_height)] = 1  # Using rock (1) as an example
             
             
-            voxel_world = np.zeros((3, 3, 3), dtype=int)
-            voxel_world[1, 1, 1] = 1
+            #voxel_world = np.zeros((3, 3, 3), dtype=int)
+            #voxel_world[1, 1, 1] = 1
             
             self.voxel_world_map[(chunk_x, chunk_y)] = voxel_world
 
@@ -288,8 +288,8 @@ class GameEngine(ShowBase):
         t1 = time.perf_counter()
         #print("voxel_world", voxel_world)
         vertices, indices = self.create_mesh_data(voxel_world, self.scale)
-        #print("vertices", vertices)
-        #print("indices", indices)
+        print("vertices", vertices)
+        print("indices", indices)
 
         t2 = time.perf_counter()
         terrainNP = self.apply_textures_to_voxels(vertices, indices)
@@ -536,28 +536,43 @@ class GameEngine(ShowBase):
                             vertices.extend([*fv, *fn, u, v])
                         
                         # Create indices for two triangles making up the face
-                        for i in range(int(len(face_vertices)/6)):
-                            indices.append(index_counter + i)
-                            index_counter += 1
+                        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+                            index_counter + 2, index_counter + 3, index_counter])
+                        index_counter += 4
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
     def generate_face_vertices(x, y, z, dx, dy, dz, voxel_size):
-        """
-        Generates vertices and normals for a given voxel face.
+        # Calculate the half size for easier offset calculation
+        half_size = voxel_size / 2
 
-        Args:
-            x, y, z: Coordinates of the voxel in the voxel grid.
-            dx, dy, dz: Direction vector of the face (e.g., (0, 0, 1) for the top face).
-            voxel_size: Size of the voxel.
+        # Depending on the direction, calculate vertices
+        if dx != 0:  # X-axis (left/right face)
+            vertices = [
+                (x + dx * half_size, y - half_size, z - half_size),
+                (x + dx * half_size, y + half_size, z - half_size),
+                (x + dx * half_size, y + half_size, z + half_size),
+                (x + dx * half_size, y - half_size, z + half_size),
+            ]
+        elif dy != 0:  # Y-axis (top/bottom face)
+            vertices = [
+                (x - half_size, y + dy * half_size, z - half_size),
+                (x + half_size, y + dy * half_size, z - half_size),
+                (x + half_size, y + dy * half_size, z + half_size),
+                (x - half_size, y + dy * half_size, z + half_size),
+            ]
+        else:  # Z-axis (front/back face)
+            vertices = [
+                (x - half_size, y - half_size, z + dz * half_size),
+                (x + half_size, y - half_size, z + dz * half_size),
+                (x + half_size, y + half_size, z + dz * half_size),
+                (x - half_size, y + half_size, z + dz * half_size),
+            ]
 
-        Returns:
-            face_vertices: A 4x3 array of vertex positions for the face.
-            face_normals: A 4x3 array of normals for the face, all identical.
-        """
-        # TODO: implement a method that generates the vertices for use in
-        # a panda3d GeomVertexWriter
+    # Return combined list of vertex attributes for simplicity
+        normal = (dx, dy, dz)
+        return vertices, [normal for _ in vertices]
 
 
 
@@ -645,7 +660,7 @@ class GameEngine(ShowBase):
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=0)  # Base can be any constant, adjust for different terrains
+                                    base=1)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
                 height_map[x, y] = height
