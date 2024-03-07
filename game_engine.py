@@ -88,6 +88,9 @@ class ChunkManager:
             if abs(chunk_pos[0] - chunk_x) > levels or abs(chunk_pos[1] - chunk_y) > levels:  # Adjusted range
                 self.unload_chunk(*chunk_pos)
 
+        num_voxels = self.game_engine.get_num_voxels_loaded()
+        print(f"{num_voxels} loaded")
+
     def load_chunk(self, chunk_x, chunk_y):
         # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
         terrainNP, terrainNode = self.game_engine.generate_chunk(chunk_x, chunk_y)
@@ -103,6 +106,9 @@ class ChunkManager:
             terrainNP.removeNode()
             # Remove the physics component from the physics world
             self.game_engine.physicsWorld.removeRigidBody(terrainNode)
+    
+    
+
 
 class GameEngine(ShowBase):
 
@@ -147,6 +153,12 @@ class GameEngine(ShowBase):
         #build_robot(self.physicsWorld)
         pass
 
+    def get_num_voxels_loaded(self):
+        total = 0
+        for coords, chunk in self.voxel_world_map.items():
+            total += len(chunk)
+        return total
+    
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
 
@@ -370,13 +382,21 @@ class GameEngine(ShowBase):
         normal_writer = GeomVertexWriter(vdata, 'normal')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
+        voxel_type_texcoords = {
+            0: [(0.0, 0.5), (0.0, 0.0), (0.5, 0.0), (0.5, 0.5)],  # Left half of texture atlas
+            1: [(0.5, 0.5), (0.5, 0.0), (1.0, 0.0), (1.0, 0.5)]   # Right half of texture atlas
+        }
+
         # Correct loop to handle 8 components per vertex (x, y, z, nx, ny, nz, u, v)
         for vertex in vertices.reshape(-1, 8):  # Adjust the reshape to account for 8 components per vertex
             x, y, z, nx, ny, nz, u, v = vertex  # Unpack all components, including texture coordinates
             #print(f"Vertex {i}: Position ({x}, {y}, {z}), Normal ({nx}, {ny}, {nz}), TexCoords ({u}, {v})")
             vertex_writer.addData3f(x, y, z)
             normal_writer.addData3f(nx, ny, nz)
-            texcoord_writer.addData2f(u, v)
+
+            voxel_type = self.get_voxel_type(x, y, z)
+            for i, tex_coord in enumerate(voxel_type_texcoords[voxel_type]):
+                texcoord_writer.addData2f(*tex_coord)
 
         # Create triangles using indices
         tris = GeomTriangles(Geom.UHStatic)
@@ -390,10 +410,24 @@ class GameEngine(ShowBase):
         geom_node = GeomNode('voxel_geom')
         geom_node.addGeom(geom)
         geom_np = NodePath(geom_node)
-        geom_np.setTexture(texture_atlas)
+        #geom_np.setTexture(texture_atlas)
         geom_np.reparentTo(self.render)
 
         return geom_np
+    
+    def get_voxel_type(self, x, y, z):
+        # Calculate chunk coordinates where this voxel exists
+        chunk_x = x // self.chunk_size 
+        chunk_y = y // self.chunk_size
+        # Adjust the voxel coordinates to be relative to the chunk
+        local_x = int(x % self.chunk_size)
+        local_y = int(y % self.chunk_size)
+        local_z = int(z) # Assuming that your height is less than chunk_size
+
+        # Get the voxel world for the corresponding chunk
+        voxel_world = self.get_voxel_world(chunk_x, chunk_y) 
+
+        return voxel_world[local_x, local_y, local_z]
 
     def visualize_normals(self, geom_node, scale=0.5):
         """
@@ -512,9 +546,6 @@ class GameEngine(ShowBase):
                         # Append generated vertices, normals, and texture coordinates to the list
                         for fv, fn in zip(face_vertices, face_normals):
                             vertices.extend([*fv, *fn, u, v])
-
-                        # Append generated vertices and normals to the lists
-                        #vertices.extend(np.column_stack((face_vertices, face_normals)).flatten())
                         
                         # Create indices for two triangles making up the face
                         indices.extend([index_counter, index_counter+1, index_counter+2, index_counter, index_counter+2, index_counter+3])
