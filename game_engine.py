@@ -84,7 +84,7 @@ class ChunkManager:
         # Use multiprocessing to generate chunks
         t0 = time.perf_counter()
         chunk_data = self.pool.starmap(GameEngine.generate_chunk,
-                        [(self.game_engine.chunk_size, self.game_engine.voxel_world_map, x, y, self.game_engine.scale) for x, y in chunks_to_load])
+                        [(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, x, y, self.game_engine.scale) for x, y in chunks_to_load])
 
         # Apply textures and physics sequentially
         t1 = time.perf_counter()
@@ -130,10 +130,6 @@ class ChunkManager:
         # Return the list of chunks that need to be loaded.
         return chunks_to_load
 
-
-    def distance(self, pos1, pos2):
-        return ((pos1.x - pos2.x) ** 2 + (pos1.y - pos2.y) ** 2) ** 0.5
-
     def unload_chunks_furthest_away(self, player_chunk_x, player_chunk_y, chunk_radius):
         # Calculate distance for each loaded chunk and keep track of their positions and distances
         chunk_distances = [
@@ -153,7 +149,6 @@ class ChunkManager:
             
         print(f"Unloaded {len(chunks_to_unload)} furthest chunks.")
         
-
     def get_number_of_loaded_vertices(self):
         result = 0
         for _, _, num_vertices in self.loaded_chunks.values():
@@ -171,7 +166,7 @@ class ChunkManager:
 
     def load_chunk(self, chunk_x, chunk_y):
         # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
-        vertices, indices, voxel_world = GameEngine.generate_chunk(self.game_engine.chunk_size, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
+        vertices, indices, voxel_world = GameEngine.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
         terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(chunk_x, chunk_y, vertices, indices)
         # Store both components in the loaded_chunks dictionary
         self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode)
@@ -190,10 +185,12 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        
         self.scale = 1
         self.ground_height = 0
+        self.max_height = 50
+        self.chunk_size = 5
 
-        self.chunk_size = 4
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
         self.texture_paths = {
@@ -201,8 +198,8 @@ class GameEngine(ShowBase):
             "grass": "assets/grass.png"
         }
 
-        self.camera.setPos(0, 0, 10)
-        self.camera.lookAt(5, 5, 0)
+        self.camera.setPos(0, 10, 10)
+        self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
         self.setup_environment()
@@ -326,9 +323,8 @@ class GameEngine(ShowBase):
         return self.physicsWorld.rayTestClosest(start_point, end_point)
         
     @staticmethod
-    def get_voxel_world(chunk_size, voxel_world_map, chunk_x, chunk_y):
+    def get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y):
         if (chunk_x, chunk_y) not in voxel_world_map:
-            max_height = 24  # Maximum height of the world
             width = chunk_size
             depth = chunk_size
             
@@ -336,8 +332,8 @@ class GameEngine(ShowBase):
             voxel_world = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            heightmap = GameEngine.generate_flat_height_map(chunk_size, height=1)
-            #heightmap = GameEngine.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
+            #heightmap = GameEngine.generate_flat_height_map(chunk_size, height=1)
+            heightmap = GameEngine.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
             
             # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
             height_levels = np.floor(heightmap).astype(int)
@@ -381,9 +377,9 @@ class GameEngine(ShowBase):
         return voxel_world_map.get((chunk_x, chunk_y))
 
     @staticmethod
-    def generate_chunk(chunk_size, voxel_world_map, chunk_x, chunk_y, scale):
+    def generate_chunk(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, scale):
         t0 = time.perf_counter()
-        voxel_world = GameEngine.get_voxel_world(chunk_size, voxel_world_map, chunk_x, chunk_y)
+        voxel_world = GameEngine.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
         t1 = time.perf_counter()
         #print(f"Loaded voxel_world for chunk {chunk_x}, {chunk_y} in {t1-t0}")
         #print("voxel_world", voxel_world)
@@ -520,7 +516,7 @@ class GameEngine(ShowBase):
         local_z = int(z) # Assuming that your height is less than chunk_size
 
         # Get the voxel world for the corresponding chunk
-        voxel_world = self.get_voxel_world(self.chunk_size, self.voxel_world_map, chunk_x, chunk_y) 
+        voxel_world = self.get_voxel_world(self.chunk_size, self.max_height, self.voxel_world_map, chunk_x, chunk_y) 
 
         return voxel_world[local_x, local_y, local_z]
 
@@ -758,7 +754,7 @@ class GameEngine(ShowBase):
         scale = 0.05  # Adjust scale to control the "zoom" level of the noise
         octaves = 4  # Number of layers of noise to combine
         persistence = 7.5  # Amplitude of each octave
-        lacunarity = 1.0  # Frequency of each octave
+        lacunarity = 1.5  # Frequency of each octave
 
         height_map = np.zeros((chunk_size + 1, chunk_size + 1))
 
@@ -779,10 +775,10 @@ class GameEngine(ShowBase):
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=0)  # Base can be any constant, adjust for different terrains
+                                    base=1)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height
+                height_map[x, y] = height * 10
 
         return height_map
     
