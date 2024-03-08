@@ -41,20 +41,26 @@ def check_surrounding_air_vectorized(voxel_world, x, y, z):
     front = padded_world[x, y, z - 1] == 0
     back = padded_world[x, y, z + 1] == 0
 
-    faces = ["left", "right", "down", "up", "front", "back"]
-    exposed = [back, front, down, up, right, left]
+    faces = ["left", "right", "down", "up", "back", "front"]
+    exposed = [left, right, down, up, back, front]
     
     return [face for face, exp in zip(faces, exposed) if exp]
 
-voxel_world = np.zeros((3,3,3), dtype=int)
-voxel_world[1, 1, 1] = 1
-voxel_world[2, 1, 1] = 1
+voxel_world1 = np.zeros((3,3,3), dtype=int)
+voxel_world1[0, 0, 0] = 1
+voxel_world1[0, 1, 0] = 1
+
+voxel_world2 = np.zeros((3,3,3), dtype=int)
+voxel_world2[0, 1, 0] = 1
+voxel_world2[0, 0, 0] = 1
 
 
-voxels = identify_exposed_voxels(voxel_world)
+voxels1 = identify_exposed_voxels(voxel_world1)
+voxels2 = identify_exposed_voxels(voxel_world2)
 
-print(voxels)
+print("identify_exposed_voxels1:", voxels1)
+print("identify_exposed_voxels2:", voxels2)
 
 
-
-print(check_surrounding_air_vectorized(voxel_world, 1, 1, 1))
+print("check_surrounding_air_vectorized1:", check_surrounding_air_vectorized(voxel_world1, 1, 1, 1))
+print("check_surrounding_air_vectorized2:", check_surrounding_air_vectorized(voxel_world2, 1, 1, 1))

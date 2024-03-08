@@ -58,8 +58,8 @@ class ChunkManager:
         self.loaded_chunks = {}
         self.pool = Pool(processes=4)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 5
-        self.chunk_radius = 16
+        self.inner_radius = 10 #5
+        self.chunk_radius = 10 #15
         self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
@@ -198,7 +198,7 @@ class GameEngine(ShowBase):
             "grass": "assets/grass.png"
         }
 
-        self.camera.setPos(0, 10, 10)
+        self.camera.setPos(5, 5, 5)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
@@ -224,13 +224,6 @@ class GameEngine(ShowBase):
     def setup_environment(self):
         #build_robot(self.physicsWorld)
         pass
-
-    def get_num_voxels_loaded(self, chunk_positions):
-        total = 0
-        for position in chunk_positions:
-            chunk = self.voxel_world_map.get(position)
-            total += len(chunk)
-        return total
     
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
@@ -354,7 +347,7 @@ class GameEngine(ShowBase):
             # Apply the mask to the voxel world
             voxel_world[mask] = 1
             
-            '''
+            
             voxel_world = np.zeros((4, 4, 4), dtype=int)
             voxel_world[1, 1, 1] = 1
             voxel_world[2, 1, 1] = 1
@@ -363,11 +356,7 @@ class GameEngine(ShowBase):
             voxel_world[2, 2, 1] = 1
             voxel_world[1, 2, 2] = 1
             voxel_world[2, 1, 2] = 1
-            voxel_world[2, 2, 2] = 1
-            '''
-            #voxel_world = np.zeros((3, 3, 3), dtype=int)
-            #oxel_world[1, 1, 1] = 1
-            
+            voxel_world[2, 2, 2] = 1         
 
             
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
@@ -621,7 +610,7 @@ class GameEngine(ShowBase):
         exposed_indices = np.argwhere(exposed_voxels)
         #print("exposed_indices", len(exposed_indices))
 
-        for x, y, z in exposed_indices:
+        for z, y, x in exposed_indices:
             exposed_faces = GameEngine.check_surrounding_air_vectorized(voxel_world, x, y, z)
             #print("exposed_faces", exposed_faces)
             for face_name, offset in face_offsets.items():
@@ -649,7 +638,7 @@ class GameEngine(ShowBase):
     
     @staticmethod
     def generate_face_vertices(x, y, z, dx, dy, dz, face_name, voxel_size):
-        #print(face_name, dx, dy, dz)
+        print(face_name, dx, dy, dz)
         """
         Generates vertices and normals for a given voxel face.
 
@@ -663,21 +652,23 @@ class GameEngine(ShowBase):
             face_normals: A list of normals for the face, all identical.
         """
 
-        # Assuming z is the vertical direction in your coordinate system
+        half_width = voxel_size / 2
+
+        # Assuming y is the vertical direction in your coordinate system
         offsets = {
-            "front": [(0, voxel_size, 0), (voxel_size, voxel_size, 0), (voxel_size, voxel_size, voxel_size), (0, voxel_size, voxel_size)],  # Looking towards positive Z direction
-            "back": [(0, 0, 0), (voxel_size, 0, 0), (voxel_size, 0, voxel_size), (0, 0, voxel_size)],  # Looking towards negative Z direction
-            "left": [(0, 0, 0), (0, voxel_size, 0), (0, voxel_size, voxel_size), (0, 0, voxel_size)],  # Looking towards negative X direction
-            "right": [(voxel_size, 0, 0), (voxel_size, voxel_size, 0), (voxel_size, voxel_size, voxel_size), (voxel_size, 0, voxel_size)],  # Looking towards positive X direction
-            "up": [(0, voxel_size, 0), (voxel_size, voxel_size, 0), (voxel_size, voxel_size, -voxel_size), (0, voxel_size, -voxel_size)],  # Y = voxel_size plane, looking up
-            "down": [(0, 0, 0), (voxel_size, 0, 0), (voxel_size, 0, -voxel_size), (0, 0, -voxel_size)],  # Y = 0 plane, looking down
+            "front": [(half_width, -half_width, -half_width), (half_width, -half_width, half_width), (half_width, half_width, half_width), (half_width, half_width, -half_width)],
+            "back": [(-half_width, -half_width, half_width), (-half_width, -half_width, -half_width), (-half_width, half_width, -half_width), (-half_width, half_width, half_width)],
+            "right": [(-half_width, -half_width, half_width), (-half_width, half_width, half_width), (half_width, half_width, half_width), (half_width, -half_width, half_width)],
+            "left": [(-half_width, -half_width, -half_width), (half_width, -half_width, -half_width), (half_width, half_width, -half_width), (-half_width, half_width, -half_width)],
+            "up": [(-half_width, half_width, -half_width), (half_width, half_width, -half_width), (half_width, half_width, half_width), (-half_width, half_width, half_width)],
+            "down": [(-half_width, -half_width, half_width), (half_width, -half_width, half_width), (half_width, -half_width, -half_width), (-half_width, -half_width, -half_width)],
         }
 
         offset_list = offsets[face_name]
 
         # Calculate vertex positions
         face_vertices = np.array([
-            [x + offset[0], y + offset[1], z + offset[2]]
+            [x + offset[0] - voxel_size, y + offset[2] - voxel_size, z + offset[1] - voxel_size]
             for offset in offset_list
         ])
 
