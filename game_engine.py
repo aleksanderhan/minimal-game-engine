@@ -43,6 +43,7 @@ from multiprocessing import Pool
 from functools import partial
 import functools
 
+
 random.seed()
 
 loadPrcFileData("", "load-file-type p3assimp")
@@ -57,8 +58,9 @@ class ChunkManager:
         self.loaded_chunks = {}
         self.pool = Pool(processes=4)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 4
+        self.inner_radius = 5
         self.chunk_radius = 16
+        self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
         player_pos = self.game_engine.camera.getPos()
@@ -78,9 +80,6 @@ class ChunkManager:
                 return  # Player still within inner radius, no loading needed
             
         chunks_to_load = self.identify_chunks_to_load(player_chunk_x, player_chunk_y, self.chunk_radius)
-
-        # Unload chunks outside the new radius
-        self.unload_chunks_outside_radius(player_chunk_x, player_chunk_y, self.chunk_radius)
         
         # Use multiprocessing to generate chunks
         t0 = time.perf_counter()
@@ -97,10 +96,15 @@ class ChunkManager:
         # Update previously_updated_position with the current player position after loading chunks
         self.previously_updated_position = (player_chunk_x, player_chunk_y)
 
+        t2 = time.perf_counter()
+        # Unload chunks outside the new radius
+        self.unload_chunks_furthest_away(player_chunk_x, player_chunk_y, self.chunk_radius)
+        t3 = time.perf_counter()
+
         if self.game_engine.args.debug:
-            t2 = time.perf_counter()
             print(f"Generated chunk mesh data in {t1-t0}")
             print(f"Loaded texture and physics in {t2-t1}")
+            print(f"Unloaded chunks in {t3-t2}")
             print(f"Loaded vertices: {self.get_number_of_loaded_vertices()}")
             print(f"Number of visible voxels: {self.get_number_of_visible_voxels()}")
 
@@ -130,10 +134,24 @@ class ChunkManager:
     def distance(self, pos1, pos2):
         return ((pos1.x - pos2.x) ** 2 + (pos1.y - pos2.y) ** 2) ** 0.5
 
-    def unload_chunks_outside_radius(self, player_chunk_x, player_chunk_y, chunk_radius):
-        for chunk_pos in list(self.loaded_chunks.keys()):
-            if ((chunk_pos[0] - player_chunk_x)**2 + (chunk_pos[1] - player_chunk_y)**2)**0.5 > chunk_radius:
-                self.unload_chunk(*chunk_pos)
+    def unload_chunks_furthest_away(self, player_chunk_x, player_chunk_y, chunk_radius):
+        # Calculate distance for each loaded chunk and keep track of their positions and distances
+        chunk_distances = [
+            (chunk_pos, ((chunk_pos[0] - player_chunk_x)**2 + (chunk_pos[1] - player_chunk_y)**2))
+            for chunk_pos in self.loaded_chunks.keys()
+        ]
+        
+        # Sort chunks by their distance in descending order (furthest first)
+        chunk_distances.sort(key=lambda x: x[1], reverse=True)
+        
+        # Select the furthest self.num_chunks to unload
+        chunks_to_unload = list(filter(lambda x: x[1] > chunk_radius, chunk_distances[:len(self.loaded_chunks) - self.num_chunks]))
+        
+        # Unload these chunks
+        for chunk_pos, _ in chunks_to_unload:
+            self.unload_chunk(*chunk_pos)
+            
+        print(f"Unloaded {len(chunks_to_unload)} furthest chunks.")
         
 
     def get_number_of_loaded_vertices(self):
@@ -175,7 +193,7 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
 
-        self.chunk_size = 8
+        self.chunk_size = 4
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
         self.texture_paths = {
@@ -318,11 +336,11 @@ class GameEngine(ShowBase):
             voxel_world = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            #heightmap = self.generate_flat_height_map(self.chunk_size, height=1)
-            heightmap = GameEngine.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
+            heightmap = GameEngine.generate_flat_height_map(chunk_size, height=1)
+            #heightmap = GameEngine.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
             
             # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
-            height_levels = np.floor(heightmap * max_height).astype(int)
+            height_levels = np.floor(heightmap).astype(int)
             height_levels = np.clip(height_levels, 0, max_height)
             adjusted_height_levels = height_levels[:-1, :-1]
 
@@ -768,7 +786,8 @@ class GameEngine(ShowBase):
 
         return height_map
     
-    def generate_flat_height_map(self, board_size, height=0):
+    @staticmethod
+    def generate_flat_height_map(board_size, height=1):
         # Adjust board_size to account for the extra row and column for seamless edges
         adjusted_size = board_size + 1
         # Create a 2D NumPy array filled with the specified height value
