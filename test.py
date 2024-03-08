@@ -46,8 +46,10 @@ def check_surrounding_air_vectorized(voxel_world, x, y, z):
     
     return [face for face, exp in zip(faces, exposed) if exp]
 
-voxel_world = np.zeros((3, 3, 3), dtype=int)
+voxel_world = np.zeros((3,3,3), dtype=int)
 voxel_world[1, 1, 1] = 1
+voxel_world[2, 1, 1] = 1
+
 
 voxels = identify_exposed_voxels(voxel_world)
 
