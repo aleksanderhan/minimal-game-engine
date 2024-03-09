@@ -40,8 +40,6 @@ from scipy.interpolate import interp2d
 from PIL import Image
 import time
 from multiprocessing import Pool
-from functools import partial
-import functools
 
 
 random.seed()
@@ -58,8 +56,8 @@ class ChunkManager:
         self.loaded_chunks = {}
         self.pool = Pool(processes=4)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 8 #5
-        self.chunk_radius = 10 #15
+        self.inner_radius = 5
+        self.chunk_radius = 15
         self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
@@ -332,9 +330,8 @@ class GameEngine(ShowBase):
             
             # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
             height_levels = np.floor(heightmap).astype(int)
-            height_levels = np.clip(height_levels, 0, max_height)
+            height_levels = np.clip(height_levels, 1, max_height)
             adjusted_height_levels = height_levels[:-1, :-1]
-
 
             # Initialize the voxel world as zeros
             voxel_world = np.zeros((width, depth, max_height), dtype=int)
@@ -345,25 +342,8 @@ class GameEngine(ShowBase):
             # Create a 3D boolean mask where true indicates a voxel should be set to rock (1)
             mask = z_indices < adjusted_height_levels[:,:,np.newaxis]
 
-
             # Apply the mask to the voxel world
-            voxel_world[mask] = 1
-            
-            '''
-            voxel_world = np.zeros((10, 10, 10), dtype=int)
-            voxel_world[1, 1, 1] = 1
-            voxel_world[2, 1, 1] = 1
-            voxel_world[1, 2, 1] = 1
-            voxel_world[1, 1, 2] = 1
-            voxel_world[2, 2, 1] = 1
-            voxel_world[1, 2, 2] = 1
-            voxel_world[2, 1, 2] = 1
-            voxel_world[2, 2, 2] = 1
-            '''
-            #voxel_world = np.zeros((3, 3, 3), dtype=int)      
-            #voxel_world[1, 1, 0] = 1
-            #voxel_world[1, 1, 1] = 1
-            
+            voxel_world[mask] = 1          
             
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
 
@@ -373,26 +353,14 @@ class GameEngine(ShowBase):
 
     @staticmethod
     def generate_chunk(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, scale):
-        t0 = time.perf_counter()
         voxel_world = GameEngine.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
-        t1 = time.perf_counter()
-        #print(f"Loaded voxel_world for chunk {chunk_x}, {chunk_y} in {t1-t0}")
-        #print("voxel_world", voxel_world)
-
         vertices, indices = GameEngine.create_mesh_data(voxel_world, scale, chunk_size)
-        #print("vertices", vertices)
-        #print("indices", indices)
-        t2 = time.perf_counter()
-        #print(f"Created mesh data for chunk {chunk_x}, {chunk_y} in {t2-t1}")
         return vertices, indices, voxel_world
         
 
     def apply_texture_and_physics(self, chunk_x, chunk_y, vertices, indices):
-        t1 = time.perf_counter()
         terrainNP = self.apply_textures_to_voxels(vertices, indices)
-        t2 = time.perf_counter()
         
-        #print(f"Applied textures for chunk {chunk_x}, {chunk_y} in {t2-t1}")
         if self.args.debug:
             self.visualize_normals(terrainNP, self.scale)
 
@@ -495,8 +463,7 @@ class GameEngine(ShowBase):
         geom_node = GeomNode('voxel_geom')
         geom_node.addGeom(geom)
         geom_np = NodePath(geom_node)
-        #geom_np.setTexture(texture_atlas)
-        geom_np.setColor(1, 0, 0, 1)
+        geom_np.setTexture(texture_atlas)
         geom_np.reparentTo(self.render)
 
         return geom_np
@@ -581,7 +548,6 @@ class GameEngine(ShowBase):
         """
 
         exposed_voxels = GameEngine.identify_exposed_voxels(voxel_world)
-        #print("exposed_voxels", exposed_voxels)
 
         vertices = []
         indices = []
@@ -601,139 +567,19 @@ class GameEngine(ShowBase):
             'up':     ( 0,  0,  1),
             'down':   ( 0, 0,  -1),
         }
-        #print("exposed_voxels", exposed_voxels)
+
         exposed_indices = np.argwhere(exposed_voxels)
-        #print("exposed_indices", exposed_indices)
 
-        '''
-        # REMOVE
-        u, v = texcoords[GameEngine.get_voxel_type(1, 1, 0, voxel_world, chunk_size)]
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, -1, 0, 0, "back", voxel_size)
-
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, 1, 0, "right", voxel_size)
-
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, -1, 0, "left", voxel_size)
-
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, 0, 1, "up", voxel_size)
-
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, 0, -1, "down", voxel_size)
-
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-
-
-
-        u, v = texcoords[GameEngine.get_voxel_type(1, 1, 1, voxel_world, chunk_size)]
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 1, 0, 0, "front", voxel_size)
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 1, 0, "right", voxel_size)
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, -1, 0, "left", voxel_size)
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 0, 1, "up", voxel_size)
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 0, -1, "down", voxel_size)
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-
-        '''
         for x, y, z in exposed_indices:
-            print("x,y,z", x, y, z)
             exposed_faces = GameEngine.check_surrounding_air_vectorized(voxel_world, x, y, z)
-            print("exposed_faces", exposed_faces)
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
-                    dx, dy, dz = normal
-
                     # Generate vertices for this face
-                    face_vertices, face_normals = GameEngine.generate_face_vertices(x, y, z, dx, dy, dz, face_name, voxel_size)
+                    face_vertices = GameEngine.generate_face_vertices(x, y, z, face_name, voxel_size)
+                    face_normals = np.tile(np.array(normal), (4, 1))
+
                     voxel_type = GameEngine.get_voxel_type(x, y, z, voxel_world, chunk_size)
                     u, v = texcoords[voxel_type]
-                    #print("face_vertices", face_vertices)
-                    #print("face_normals", face_normals)
 
                     # Append generated vertices, normals, and texture coordinates to the list
                     for fv, fn in zip(face_vertices, face_normals):
@@ -744,13 +590,11 @@ class GameEngine(ShowBase):
                         index_counter + 2, index_counter + 3, index_counter])
                     
                     index_counter += 4
-                     
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
-    def generate_face_vertices(x, y, z, dx, dy, dz, face_name, voxel_size):
-        print("x, y, z, dx, dy, dz, face_name", x, y, z, dx, dy, dz, face_name)
+    def generate_face_vertices(x, y, z, face_name, voxel_size):
         """
         Generates vertices and normals for a given voxel face.
 
@@ -781,15 +625,7 @@ class GameEngine(ShowBase):
             for offset in offset_list
         ])
 
-        # Face normal (adjust signs based on your coordinate system and desired face direction)
-        normal = np.array([dx, dy, dz])
-        # Create list of normals, all identical
-        face_normals = np.tile(normal, (4, 1))
-
-        return face_vertices, face_normals
-
-
-
+        return face_vertices
     
     @staticmethod
     def identify_exposed_voxels(voxel_world):
@@ -821,8 +657,6 @@ class GameEngine(ShowBase):
         
         return exposed_faces
 
-
-
     def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
         
@@ -847,14 +681,13 @@ class GameEngine(ShowBase):
         terrainNP.setPos(world_x, world_y, 0)
         self.physicsWorld.attachRigidBody(terrainNode)
         return terrainNode
-
     
     @staticmethod
     def generate_perlin_height_map(chunk_size, chunk_x, chunk_y):
         scale = 0.05  # Adjust scale to control the "zoom" level of the noise
-        octaves = 4  # Number of layers of noise to combine
-        persistence = 7.5  # Amplitude of each octave
-        lacunarity = 1.5  # Frequency of each octave
+        octaves = 6  # Number of layers of noise to combine
+        persistence = 0.5  # Amplitude of each octave
+        lacunarity = 2.0  # Frequency of each octave
 
         height_map = np.zeros((chunk_size + 1, chunk_size + 1))
 
@@ -878,7 +711,7 @@ class GameEngine(ShowBase):
                                     base=1)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 10
+                height_map[x, y] = height * 30
 
         return height_map
     
