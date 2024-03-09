@@ -61,8 +61,8 @@ class ChunkManager:
 
     def get_player_chunk_pos(self):
         player_pos = self.game_engine.camera.getPos()
-        chunk_x = int(player_pos.x) // self.game_engine.chunk_size
-        chunk_y = int(player_pos.y) // self.game_engine.chunk_size
+        chunk_x = int(player_pos.x / self.game_engine.scale) // self.game_engine.chunk_size
+        chunk_y = int(player_pos.y / self.game_engine.scale) // self.game_engine.chunk_size
         return chunk_x, chunk_y
 
     def update_chunks(self):
@@ -361,7 +361,7 @@ class GameEngine(ShowBase):
         terrainNP = self.apply_textures_to_voxels(vertices, indices)
         
         if self.args.debug:
-            self.visualize_normals(terrainNP, self.scale)
+            self.visualize_normals(terrainNP, chunk_x, chunk_y)
 
         # Position the flat terrain chunk according to its world coordinates
         world_x = chunk_x * self.chunk_size * self.scale
@@ -467,37 +467,60 @@ class GameEngine(ShowBase):
 
         return geom_np
 
-    def visualize_normals(self, geom_node, scale=0.5):
+    def visualize_normals(self, geom_node, chunk_x, chunk_y, scale=0.5):
         """
-        Visualizes the normals of a geometry node.
+        Visualizes the normals of a geometry node, positioning them
+        correctly based on the chunk's position in the world.
 
         Parameters:
         - geom_node: The geometry node whose normals you want to visualize.
-        - scale: How long the normal lines should be.
+        - chunk_x, chunk_y: The chunk's position in the grid/map.
+        - scale: The scale factor used for the visualization length of normals.
         """
-        # Create a new NodePath to attach the lines to
+        # Assuming you have a method to calculate the chunk's world position:
+        chunk_world_x, chunk_world_y = self.calculate_chunk_world_position(chunk_x, chunk_y, scale)
+
         lines_np = NodePath("normals_visualization")
-        
-        # Create a LineSegs object to hold the lines
         lines = LineSegs()
         lines.setThickness(2.0)
-        lines.setColor(1, 0, 0, 1)  # Red color for visibility
+        lines.setColor(1, 0, 0, 1)
 
-        # Iterate through the geometry to get vertex positions and normals
         geom = geom_node.node().getGeom(0)
         vdata = geom.getVertexData()
         vertex_reader = GeomVertexReader(vdata, "vertex")
         normal_reader = GeomVertexReader(vdata, "normal")
 
         while not vertex_reader.isAtEnd():
-            v = vertex_reader.getData3f()
+            local_v = vertex_reader.getData3f()
             n = normal_reader.getData3f()
-            lines.moveTo(v)
-            lines.drawTo(v + n * scale)  # Draw line in the direction of the normal
 
-        # Add the lines to the NodePath and attach it to render
+            # Adjust local vertex position by chunk's world position
+            global_v = Vec3(local_v.getX() + chunk_world_x, local_v.getY() + chunk_world_y, local_v.getZ())
+
+            # Calculate normal end point
+            normal_end = global_v + n * scale
+
+            lines.moveTo(global_v)
+            lines.drawTo(normal_end)
+
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
+
+    def calculate_chunk_world_position(self, chunk_x, chunk_y, scale):
+        """
+        Calculates the world position of the chunk based on its grid position.
+
+        Parameters:
+        - chunk_x, chunk_y: The chunk's position in the grid/map.
+        - scale: The scale factor used in the game.
+
+        Returns:
+        Tuple[float, float]: The world coordinates of the chunk.
+        """
+        # Adjust these calculations based on how you define chunk positions in world space
+        world_x = chunk_x * self.chunk_size * scale
+        world_y = chunk_y * self.chunk_size * scale
+        return world_x, world_y
 
     @staticmethod
     def check_surrounding_air_vectorized(voxel_world, x, y, z):
@@ -544,18 +567,18 @@ class GameEngine(ShowBase):
         index_counter = 0  # Track indices for each exposed face
 
         texcoords = {
-            1: (0, 0),  # Texture 1 starts at the beginning of the atlas
+            1: (0, 0.25),  # Texture 1 starts at the beginning of the atlas
             2: (0.5, 0)  # Texture 2 starts halfway across the atlas
         }
 
         # Define offsets for each face (adjust based on your coordinate system)
         normals = {
-            'front':  ( 1,  0,  0),
-            'back':   (-1,  0,  0),
-            'right':  ( 0,  1,  0),
-            'left':   ( 0,  -1,  0),
-            'up':     ( 0,  0,  1),
-            'down':   ( 0, 0,  -1),
+            'front':  ( 0,  0,  1),
+            'back':   ( 0,  0,  -1),
+            'right':  ( 1,  0,  0),
+            'left':   ( -1,  0,  0),
+            'up':     ( 0,  1,  0),
+            'down':   ( -0, -1,  0),
         }
 
         exposed_indices = np.argwhere(exposed_voxels)
