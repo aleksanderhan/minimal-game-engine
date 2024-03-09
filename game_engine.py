@@ -469,21 +469,6 @@ class GameEngine(ShowBase):
         return geom_np
     
     @staticmethod
-    def calculate_uv_coordinates(vertices, board_size):
-        # Extract x and y coordinates from vertices
-        x_coords = vertices[:, 0]
-        y_coords = vertices[:, 1]
-        
-        # Normalize x and y coordinates by board_size to get u and v values
-        u = x_coords / board_size
-        v = y_coords / board_size
-        
-        # Stack u and v to form the UV coordinates array
-        uv_coords = np.stack((u, v), axis=-1)
-        
-        return uv_coords
-    
-    @staticmethod
     def get_voxel_type(x, y, z, voxel_world, chunk_size):
         # Adjust the voxel coordinates to be relative to the chunk
         local_x = int(x % chunk_size)
@@ -568,6 +553,10 @@ class GameEngine(ShowBase):
         indices = []
         index_counter = 0  # Track indices for each exposed face
 
+        texcoords = {
+            1: (0.25, 0.5), # Stone
+            2: (0.75, 0.5), # Grass
+        }
 
         # Define offsets for each face (adjust based on your coordinate system)
         normals = {
@@ -590,7 +579,6 @@ class GameEngine(ShowBase):
                     face_normals = np.tile(np.array(normal), (4, 1))
 
                     voxel_type = GameEngine.get_voxel_type(x, y, z, voxel_world, chunk_size)
-                    texcoords = GameEngine.calculate_uv_coordinates(vertices, chunk_size)
                     u, v = texcoords[voxel_type]
 
                     # Append generated vertices, normals, and texture coordinates to the list
