@@ -51,8 +51,8 @@ voxel_world1[0, 0, 0] = 1
 voxel_world1[0, 1, 0] = 1
 
 voxel_world2 = np.zeros((3,3,3), dtype=int)
-voxel_world2[0, 0, 0] = 1
-voxel_world2[0, 1, 0] = 1
+voxel_world2[1, 1, 0] = 1
+voxel_world2[1, 1, 1] = 1
 
 
 voxels1 = identify_exposed_voxels(voxel_world1)

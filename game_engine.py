@@ -58,8 +58,8 @@ class ChunkManager:
         self.loaded_chunks = {}
         self.pool = Pool(processes=4)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 0 #5
-        self.chunk_radius = 0 #15
+        self.inner_radius = 8 #5
+        self.chunk_radius = 10 #15
         self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
@@ -349,7 +349,7 @@ class GameEngine(ShowBase):
             # Apply the mask to the voxel world
             voxel_world[mask] = 1
             
-            
+            '''
             voxel_world = np.zeros((10, 10, 10), dtype=int)
             voxel_world[1, 1, 1] = 1
             voxel_world[2, 1, 1] = 1
@@ -359,10 +359,10 @@ class GameEngine(ShowBase):
             voxel_world[1, 2, 2] = 1
             voxel_world[2, 1, 2] = 1
             voxel_world[2, 2, 2] = 1
-            
-            voxel_world = np.zeros((3, 3, 3), dtype=int)      
-            voxel_world[1, 0, 1] = 1
-            voxel_world[1, 1, 1] = 1
+            '''
+            #voxel_world = np.zeros((3, 3, 3), dtype=int)      
+            #voxel_world[1, 1, 0] = 1
+            #voxel_world[1, 1, 1] = 1
             
             
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
@@ -379,7 +379,7 @@ class GameEngine(ShowBase):
         #print(f"Loaded voxel_world for chunk {chunk_x}, {chunk_y} in {t1-t0}")
         #print("voxel_world", voxel_world)
 
-        vertices, indices = GameEngine.create_mesh_data(voxel_world, scale)
+        vertices, indices = GameEngine.create_mesh_data(voxel_world, scale, chunk_size)
         #print("vertices", vertices)
         #print("indices", indices)
         t2 = time.perf_counter()
@@ -501,17 +501,12 @@ class GameEngine(ShowBase):
 
         return geom_np
     
-    def get_voxel_type(self, x, y, z):
-        # Calculate chunk coordinates where this voxel exists
-        chunk_x = x // self.chunk_size 
-        chunk_y = y // self.chunk_size
+    @staticmethod
+    def get_voxel_type(x, y, z, voxel_world, chunk_size):
         # Adjust the voxel coordinates to be relative to the chunk
-        local_x = int(x % self.chunk_size)
-        local_y = int(y % self.chunk_size)
+        local_x = int(x % chunk_size)
+        local_y = int(y % chunk_size)
         local_z = int(z) # Assuming that your height is less than chunk_size
-
-        # Get the voxel world for the corresponding chunk
-        voxel_world = self.get_voxel_world(self.chunk_size, self.max_height, self.voxel_world_map, chunk_x, chunk_y) 
 
         return voxel_world[local_x, local_y, local_z]
 
@@ -564,8 +559,8 @@ class GameEngine(ShowBase):
         right = padded_world[x + 1, y, z] == 0
         down = padded_world[x, y - 1, z] == 0
         up = padded_world[x, y + 1, z] == 0
-        front = padded_world[x, y, z - 1] == 0
-        back = padded_world[x, y, z + 1] == 0
+        back = padded_world[x, y, z - 1] == 0
+        front = padded_world[x, y, z + 1] == 0
 
         faces = ["left", "right", "down", "up", "back", "front"]
         exposed = [left, right, down, up, back, front]
@@ -573,7 +568,7 @@ class GameEngine(ShowBase):
         return [face for face, exp in zip(faces, exposed) if exp]
 
     @staticmethod
-    def create_mesh_data(voxel_world, voxel_size):
+    def create_mesh_data(voxel_world, voxel_size, chunk_size):
         """Efficiently creates mesh data for exposed voxel faces.
 
         Args:
@@ -592,34 +587,28 @@ class GameEngine(ShowBase):
         indices = []
         index_counter = 0  # Track indices for each exposed face
 
-        # Example texture coordinates for each face, adjust as needed for your texture atlas
-        # These are placeholders and should be modified according to how your textures are mapped
         texcoords = {
-            'left': (0.25, 0.5),  # Averages the left texture's UVs
-            'right': (0.75, 0.5), # Averages the right texture's UVs
-            'down': (0.25, 0.5),  # Could also map to either texture's average
-            'up': (0.75, 0.5),    # Another example, mapping to the right
-            'back': (0.25, 0.5),  # Averages for left texture's UVs
-            'front': (0.75, 0.5), # Averages for right texture's UVs
+            1: (0.25, 0.5), # Stone
+            2: (0.75, 0.5), # Grass
         }
 
         # Define offsets for each face (adjust based on your coordinate system)
-        face_offsets = {
-            'front':  ( 0,  0,  voxel_size),
-            'back':   ( 0,  0, -voxel_size),
-            'right':  ( voxel_size,  0,  0),
-            'left':   (-voxel_size,  0,  0),
-            'up':     ( 0,  voxel_size,  0),
-            'down':   ( 0, -voxel_size,  0),
+        normals = {
+            'front':  ( 1,  0,  0),
+            'back':   (-1,  0,  0),
+            'right':  ( 0,  1,  0),
+            'left':   ( 0,  -1,  0),
+            'up':     ( 0,  0,  1),
+            'down':   ( 0, 0,  -1),
         }
-        #print("exposed_voxels", len(exposed_voxels))
+        #print("exposed_voxels", exposed_voxels)
         exposed_indices = np.argwhere(exposed_voxels)
-        #print("exposed_indices", len(exposed_indices))
+        #print("exposed_indices", exposed_indices)
 
         '''
         # REMOVE
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 0, -1, "down", voxel_size)
-        u, v = texcoords["up"]
+        u, v = texcoords[GameEngine.get_voxel_type(1, 1, 0, voxel_world, chunk_size)]
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, -1, 0, 0, "back", voxel_size)
 
         for fv, fn in zip(face_vertices, face_normals):
             vertices.extend([*fv, *fn, u, v])
@@ -630,9 +619,96 @@ class GameEngine(ShowBase):
         
         index_counter += 4
 
-        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 2, 1, 0, 0, -1, "down", voxel_size)
-        u, v = texcoords["up"]
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, 1, 0, "right", voxel_size)
 
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, -1, 0, "left", voxel_size)
+
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, 0, 1, "up", voxel_size)
+
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 0, 0, 0, -1, "down", voxel_size)
+
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+
+
+
+        u, v = texcoords[GameEngine.get_voxel_type(1, 1, 1, voxel_world, chunk_size)]
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 1, 0, 0, "front", voxel_size)
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 1, 0, "right", voxel_size)
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, -1, 0, "left", voxel_size)
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 0, 1, "up", voxel_size)
+        for fv, fn in zip(face_vertices, face_normals):
+            vertices.extend([*fv, *fn, u, v])
+        
+        # Create indices for two triangles making up the face
+        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+            index_counter + 2, index_counter + 3, index_counter])
+        
+        index_counter += 4
+
+        face_vertices, face_normals = GameEngine.generate_face_vertices(1, 1, 1, 0, 0, -1, "down", voxel_size)
         for fv, fn in zip(face_vertices, face_normals):
             vertices.extend([*fv, *fn, u, v])
         
@@ -645,15 +721,17 @@ class GameEngine(ShowBase):
 
         '''
         for x, y, z in exposed_indices:
+            print("x,y,z", x, y, z)
             exposed_faces = GameEngine.check_surrounding_air_vectorized(voxel_world, x, y, z)
-            #print("exposed_faces", exposed_faces)
-            for face_name, offset in face_offsets.items():
+            print("exposed_faces", exposed_faces)
+            for face_name, normal in normals.items():
                 if face_name in exposed_faces:
-                    dx, dy, dz = offset
+                    dx, dy, dz = normal
 
                     # Generate vertices for this face
                     face_vertices, face_normals = GameEngine.generate_face_vertices(x, y, z, dx, dy, dz, face_name, voxel_size)
-                    u, v = texcoords[face_name]
+                    voxel_type = GameEngine.get_voxel_type(x, y, z, voxel_world, chunk_size)
+                    u, v = texcoords[voxel_type]
                     #print("face_vertices", face_vertices)
                     #print("face_normals", face_normals)
 
@@ -666,7 +744,7 @@ class GameEngine(ShowBase):
                         index_counter + 2, index_counter + 3, index_counter])
                     
                     index_counter += 4
-                      
+                     
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
@@ -688,17 +766,14 @@ class GameEngine(ShowBase):
 
         half_width = voxel_size / 2
 
-        # Assuming y is the vertical direction in your coordinate system
-        offsets = {
-            "front": [(half_width, -half_width, -half_width), (half_width, -half_width, half_width), (half_width, half_width, half_width), (half_width, half_width, -half_width)],
-            "back": [(-half_width, -half_width, half_width), (-half_width, -half_width, -half_width), (-half_width, half_width, -half_width), (-half_width, half_width, half_width)],
-            "right": [(-half_width, -half_width, half_width), (-half_width, half_width, half_width), (half_width, half_width, half_width), (half_width, -half_width, half_width)],
-            "left": [(-half_width, -half_width, -half_width), (half_width, -half_width, -half_width), (half_width, half_width, -half_width), (-half_width, half_width, -half_width)],
-            "up": [(-half_width, half_width, -half_width), (half_width, half_width, -half_width), (half_width, half_width, half_width), (-half_width, half_width, half_width)],
-            "down": [(-half_width, -half_width, half_width), (half_width, -half_width, half_width), (half_width, -half_width, -half_width), (-half_width, -half_width, -half_width)],
-        }
-
-        offset_list = offsets[face_name]
+        offset_list = {
+            "right": [(half_width, -half_width, -half_width), (half_width, -half_width, half_width), (half_width, half_width, half_width), (half_width, half_width, -half_width)],
+            "left": [(-half_width, -half_width, half_width), (-half_width, -half_width, -half_width), (-half_width, half_width, -half_width), (-half_width, half_width, half_width)],
+            "up": [(-half_width, -half_width, half_width), (-half_width, half_width, half_width), (half_width, half_width, half_width), (half_width, -half_width, half_width)],
+            "down": [(-half_width, -half_width, -half_width), (half_width, -half_width, -half_width), (half_width, half_width, -half_width), (-half_width, half_width, -half_width)],
+            "front": [(-half_width, half_width, -half_width), (half_width, half_width, -half_width), (half_width, half_width, half_width), (-half_width, half_width, half_width)],
+            "back": [(-half_width, -half_width, half_width), (half_width, -half_width, half_width), (half_width, -half_width, -half_width), (-half_width, -half_width, -half_width)],
+        }[face_name]
 
         # Calculate vertex positions
         face_vertices = np.array([
