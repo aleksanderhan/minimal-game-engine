@@ -48,17 +48,16 @@ loadPrcFileData("", "load-file-type p3assimp")
 loadPrcFileData("", "bullet-enable-contact-events true")
 loadPrcFileData('', 'win-size 1680 1050')
 loadPrcFileData("", "threading-model Cull/Draw")
-loadPrcFileData('', 'want-pstats 1')
 
 class ChunkManager:
     def __init__(self, game_engine):
         self.game_engine = game_engine
         self.loaded_chunks = {}
-        self.pool = Pool(processes=4)
+        self.pool = Pool(processes=6)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 5
-        self.chunk_radius = 15
-        self.num_chunks = 4*int(3.14*self.chunk_radius**2)
+        self.inner_radius = 6
+        self.chunk_radius = 12
+        self.num_chunks = 3*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
         player_pos = self.game_engine.camera.getPos()
@@ -186,7 +185,7 @@ class GameEngine(ShowBase):
 
         #self.render.setTwoSided(True)
         
-        self.scale = 1
+        self.scale = 0.5
         self.ground_height = 0
         self.max_height = 50
         self.chunk_size = 5
@@ -354,7 +353,7 @@ class GameEngine(ShowBase):
     @staticmethod
     def generate_chunk(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, scale):
         voxel_world = GameEngine.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
-        vertices, indices = GameEngine.create_mesh_data(voxel_world, scale, chunk_size)
+        vertices, indices = GameEngine.create_mesh_data(voxel_world, scale)
         return vertices, indices, voxel_world
         
 
@@ -467,15 +466,6 @@ class GameEngine(ShowBase):
         geom_np.reparentTo(self.render)
 
         return geom_np
-    
-    @staticmethod
-    def get_voxel_type(x, y, z, voxel_world, chunk_size):
-        # Adjust the voxel coordinates to be relative to the chunk
-        local_x = int(x % chunk_size)
-        local_y = int(y % chunk_size)
-        local_z = int(z) # Assuming that your height is less than chunk_size
-
-        return voxel_world[local_x, local_y, local_z]
 
     def visualize_normals(self, geom_node, scale=0.5):
         """
@@ -535,7 +525,7 @@ class GameEngine(ShowBase):
         return [face for face, exp in zip(faces, exposed) if exp]
 
     @staticmethod
-    def create_mesh_data(voxel_world, voxel_size, chunk_size):
+    def create_mesh_data(voxel_world, voxel_size):
         """Efficiently creates mesh data for exposed voxel faces.
 
         Args:
@@ -554,8 +544,8 @@ class GameEngine(ShowBase):
         index_counter = 0  # Track indices for each exposed face
 
         texcoords = {
-            1: (0.25, 0.5), # Stone
-            2: (0.75, 0.5), # Grass
+            1: (0, 0),  # Texture 1 starts at the beginning of the atlas
+            2: (0.5, 0)  # Texture 2 starts halfway across the atlas
         }
 
         # Define offsets for each face (adjust based on your coordinate system)
@@ -578,7 +568,7 @@ class GameEngine(ShowBase):
                     face_vertices = GameEngine.generate_face_vertices(x, y, z, face_name, voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type = GameEngine.get_voxel_type(x, y, z, voxel_world, chunk_size)
+                    voxel_type = voxel_world[x, y, z]
                     u, v = texcoords[voxel_type]
 
                     # Append generated vertices, normals, and texture coordinates to the list
@@ -608,20 +598,18 @@ class GameEngine(ShowBase):
             face_normals: A list of normals for the face, all identical.
         """
 
-        half_width = voxel_size / 2
-
         offset_list = {
-            "right": [(half_width, -half_width, -half_width), (half_width, -half_width, half_width), (half_width, half_width, half_width), (half_width, half_width, -half_width)],
-            "left": [(-half_width, -half_width, half_width), (-half_width, -half_width, -half_width), (-half_width, half_width, -half_width), (-half_width, half_width, half_width)],
-            "up": [(-half_width, -half_width, half_width), (-half_width, half_width, half_width), (half_width, half_width, half_width), (half_width, -half_width, half_width)],
-            "down": [(-half_width, -half_width, -half_width), (half_width, -half_width, -half_width), (half_width, half_width, -half_width), (-half_width, half_width, -half_width)],
-            "front": [(-half_width, half_width, -half_width), (half_width, half_width, -half_width), (half_width, half_width, half_width), (-half_width, half_width, half_width)],
-            "back": [(-half_width, -half_width, half_width), (half_width, -half_width, half_width), (half_width, -half_width, -half_width), (-half_width, -half_width, -half_width)],
+            "right": [(1, -1, -1), (1, -1, 1), (1, 1, 1), (1, 1, -1)],
+            "left": [(-1, -1, 1), (-1, -1, -1), (-1, 1, -1), (-1, 1, 1)],
+            "up": [(-1, -1, 1), (-1, 1, 1), (1, 1, 1), (1, -1, 1)],
+            "down": [(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1)],
+            "front": [(-1, 1, -1), (1, 1, -1), (1, 1, 1), (-1, 1, 1)],
+            "back": [(-1, -1, 1), (1, -1, 1), (1, -1, -1), (-1, -1, -1)],
         }[face_name]
 
         # Calculate vertex positions
         face_vertices = np.array([
-            [x + offset[0] - voxel_size, y + offset[2] - voxel_size, z + offset[1] - voxel_size]
+            [(x + offset[0] - 1)*voxel_size, (y + offset[2] - 1)*voxel_size, (z + offset[1] - 1)*voxel_size]
             for offset in offset_list
         ])
 
@@ -853,6 +841,8 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
+    if args.debug:
+        loadPrcFileData('', 'want-pstats 1')
 
     game = GameEngine(args)
     # Create a WindowProperties object
