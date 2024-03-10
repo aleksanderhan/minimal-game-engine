@@ -3,3 +3,4 @@ pybullet
 pyautogui
 noise
 numpy
+scipy
