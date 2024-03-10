@@ -56,8 +56,8 @@ class ChunkManager:
         self.loaded_chunks = {}
         self.pool = Pool(processes=6)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 6
-        self.chunk_radius = 12
+        self.inner_radius = 10
+        self.chunk_radius = 15
         self.num_chunks = 3*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
@@ -86,9 +86,9 @@ class ChunkManager:
 
         # Apply textures and physics sequentially
         t1 = time.perf_counter()
-        for (x, y), (vertices, indices, face_names, voxel_world) in zip(chunks_to_load, chunk_data):
+        for (x, y), (vertices, indices, voxel_world) in zip(chunks_to_load, chunk_data):
             self.game_engine.voxel_world_map[(x, y)] = voxel_world
-            terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(x, y, vertices, indices, face_names)
+            terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(x, y, vertices, indices)
             self.loaded_chunks[(x, y)] = (terrainNP, terrainNode, len(vertices))
 
         # Update previously_updated_position with the current player position after loading chunks
@@ -164,8 +164,8 @@ class ChunkManager:
 
     def load_chunk(self, chunk_x, chunk_y):
         # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
-        vertices, indices, face_names, voxel_world = GameEngine.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
-        terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(chunk_x, chunk_y, vertices, indices, face_names)
+        vertices, indices, voxel_world = GameEngine.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
+        terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(chunk_x, chunk_y, vertices, indices)
         # Store both components in the loaded_chunks dictionary
         self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode)
 
@@ -189,7 +189,7 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
         self.max_height = 50
-        self.chunk_size = 8
+        self.chunk_size = 5
 
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
@@ -346,9 +346,9 @@ class GameEngine(ShowBase):
             voxel_world[mask] = 1
 
 
-            voxel_world = np.zeros((5, 5, 5), dtype=int)
-            voxel_world[1, 1, 1] = 1    
-            voxel_world[1, 1, 0] = 1    
+            #voxel_world = np.zeros((5, 5, 5), dtype=int)
+            #voxel_world[1, 1, 1] = 1    
+            #voxel_world[1, 1, 0] = 1    
             
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
 
@@ -359,14 +359,14 @@ class GameEngine(ShowBase):
     @staticmethod
     def generate_chunk(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, scale):
         voxel_world = GameEngine.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
-        vertices, indices, face_names = GameEngine.create_mesh_data(voxel_world, scale)
-        return vertices, indices, face_names, voxel_world
+        vertices, indices = GameEngine.create_mesh_data(voxel_world, scale)
+        return vertices, indices, voxel_world
         
 
-    def apply_texture_and_physics(self, chunk_x, chunk_y, vertices, indices, face_names):
-        terrainNP = self.apply_textures_to_voxels(vertices, indices, face_names)
+    def apply_texture_and_physics(self, chunk_x, chunk_y, vertices, indices):
+        terrainNP = self.apply_textures_to_voxels(vertices, indices)
         
-        if self.args.debug:
+        if self.args.normals:
             self.visualize_normals(terrainNP, chunk_x, chunk_y)
 
         # Position the flat terrain chunk according to its world coordinates
@@ -442,7 +442,7 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
-    def apply_textures_to_voxels(self, vertices, indices, face_names):
+    def apply_textures_to_voxels(self, vertices, indices):
         texture_atlas = self.loader.loadTexture("texture_atlas.png")
         format = GeomVertexFormat.getV3n3t2()  # Ensure format includes texture coordinates
         #vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
@@ -454,12 +454,12 @@ class GameEngine(ShowBase):
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
         colors = {
-            "front": (1, 0, 0, 1), # red
-            "back": (0, 1, 0, 1), # green
-            "right": (0, 0, 1, 1), # blue
-            "left": (1, 1, 0, 1), # yellow
-            "up": (0, 1, 1, 1), # cyan
-            "down": (1, 0, 1, 1)  # magenta
+            (0, 1, 0): (1, 0, 0, 1), # red - front
+            (0, -1, 0): (0, 1, 0, 1), # green - back
+            (1, 0, 0): (0, 0, 1, 1), # blue - right
+            (-1, 0, 0): (1, 1, 0, 1), # yellow -left
+            (0, 0, 1): (0, 1, 1, 1), # cyan - up
+            (0, 0, -1): (1, 0, 1, 1)  # magenta -down
         }
 
 
@@ -467,9 +467,9 @@ class GameEngine(ShowBase):
             vertex_writer.addData3f(vertices[i], vertices[i+1], vertices[i+2])
             normal_writer.addData3f(vertices[i+3], vertices[i+4], vertices[i+5])
             texcoord_writer.addData2f(vertices[i+6], vertices[i+7])
-            
-            face = face_names.pop()
-            color = colors[face]
+
+            dx, dy, dz = vertices[i+3], vertices[i+4], vertices[i+5]
+            color = colors[(dx, dy, dz)]
             color_writer.addData4f(color)
 
         # Create triangles using indices
@@ -576,12 +576,12 @@ class GameEngine(ShowBase):
         x, y, z = x + 1, y + 1, z + 1
 
         # Check the six directions around the point for air, vectorized
-        left = padded_world[x - 1, y, z] == 0
+        front = padded_world[x, y+1, z] == 0
+        back = padded_world[x, y-1, z] == 0
         right = padded_world[x + 1, y, z] == 0
-        down = padded_world[x, y - 1, z] == 0
-        up = padded_world[x, y + 1, z] == 0
-        back = padded_world[x, y, z - 1] == 0
-        front = padded_world[x, y, z + 1] == 0
+        left = padded_world[x - 1, y, z] == 0
+        up = padded_world[x, y , z + 1] == 0
+        down = padded_world[x, y , z - 1] == 0
 
         faces = ["left", "right", "down", "up", "back", "front"]
         exposed = [left, right, down, up, back, front]
@@ -632,40 +632,42 @@ class GameEngine(ShowBase):
             'back':   (0,  -1,  0),
             'right':  ( 1,  0,  0),
             'left':   ( -1, 0,  0),
-            'up':     ( 0,  0,  1),
-            'down':   ( 0,  0, -1),
+            'up':   ( 0,  0, -1),
+            'down':     ( 0,  0,  1),
         }
 
         exposed_indices = np.argwhere(exposed_voxels)
 
-        voxel_type = 1
         
-
         '''
-        face_name = "front"
-        face_vertices = GameEngine.generate_face_vertices(1, 1, 1, face_name, voxel_size)
-        face_normals = np.tile(np.array(normals[face_name]), (4, 1))
+        voxel_type = 1
+        face_names = ["front", "right", "left", "up", "down"]
 
-        uvs = uv_maps[voxel_type][face_name]
+        for i in [0, 1]:
+            for face_name in face_names:
+                face_vertices = GameEngine.generate_face_vertices(1, 1, i, face_name, voxel_size)
+                face_normals = np.tile(np.array(normals[face_name]), (4, 1))
 
-        u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
-
-        # Append generated vertices, normals, and texture coordinates to the list
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
         
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
+                uvs = uv_maps[voxel_type][face_name]
+
+                u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
+
+                # Append generated vertices, normals, and texture coordinates to the list
+                for fv, fn in zip(face_vertices, face_normals):
+                    vertices.extend([*fv, *fn, u, v])
+                
+                # Create indices for two triangles making up the face
+                indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+                    index_counter + 2, index_counter + 3, index_counter])
+                
+                index_counter += 4
 
         
         face_name = "back"
         face_vertices = GameEngine.generate_face_vertices(1, 1, 1, face_name, voxel_size)
         face_normals = np.tile(np.array(normals[face_name]), (4, 1))
 
-  
         uvs = uv_maps[voxel_type][face_name]
 
         u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
@@ -679,94 +681,15 @@ class GameEngine(ShowBase):
             index_counter + 2, index_counter + 3, index_counter])
         
         index_counter += 4
-
         
-        face_name = "right"
-        face_vertices = GameEngine.generate_face_vertices(1, 1, 1, face_name, voxel_size)
-        face_normals = np.tile(np.array(normals[face_name]), (4, 1))
-
-        uvs = uv_maps[voxel_type][face_name]
-
-        u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
-
-        # Append generated vertices, normals, and texture coordinates to the list
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-
-        
-        face_name = "left"
-        face_vertices = GameEngine.generate_face_vertices(1, 1, 1, face_name, voxel_size)
-        face_normals = np.tile(np.array(normals[face_name]), (4, 1))
-
-        uvs = uv_maps[voxel_type][face_name]
-
-        u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
-
-        # Append generated vertices, normals, and texture coordinates to the list
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        
-        
-        face_name = "up"
-        face_vertices = GameEngine.generate_face_vertices(1, 1, 1, face_name, voxel_size)
-        face_normals = np.tile(np.array(normals[face_name]), (4, 1))
-
-        uvs = uv_maps[voxel_type][face_name]
-
-        u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
-
-        # Append generated vertices, normals, and texture coordinates to the list
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
-
-        
-        face_name = "down"
-        face_vertices = GameEngine.generate_face_vertices(1, 1, 1, face_name, voxel_size)
-        face_normals = np.tile(np.array(normals[face_name]), (4, 1))
-
-        uvs = uv_maps[voxel_type][face_name]
-
-        u, v = uvs[0]  # Cycle through the UV coordinates for each vertex
-
-        # Append generated vertices, normals, and texture coordinates to the list
-        for fv, fn in zip(face_vertices, face_normals):
-            vertices.extend([*fv, *fn, u, v])
-        
-        # Create indices for two triangles making up the face
-        indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-            index_counter + 2, index_counter + 3, index_counter])
-        
-        index_counter += 4
         
         '''
         
-        face_names = [] # Ordered list of face_names as they should be loaded
         for x, y, z in exposed_indices:
             exposed_faces = GameEngine.check_surrounding_air_vectorized(voxel_world, x, y, z)
             j = 0
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
-                    face_names.append(face_name)
                     # Generate vertices for this face
                     face_vertices = GameEngine.generate_face_vertices(x, y, z, face_name, voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
@@ -787,7 +710,7 @@ class GameEngine(ShowBase):
                     index_counter += 4
                     j += 1
         
-        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32), face_names
+        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
     def generate_face_vertices(x, y, z, face_name, voxel_size):
@@ -801,55 +724,29 @@ class GameEngine(ShowBase):
 
         Returns:
             face_vertices: A list of vertex positions for the face.
-            face_normals: A list of normals for the face, all identical.
         """
 
-        offset_list = {
-            "front": GameEngine.noop_transform([(1, 1, 1), (1, -1, 1), (-1, -1, 1), (-1, 1, 1)]),
-            "back": GameEngine.noop_transform([(-1, 1, -1), (-1, -1, -1), (1, -1, -1), (1, 1, -1)]),
-            "right": GameEngine.noop_transform([(1, 1, 1), (1, 1, -1), (1, -1, -1), (1, -1, 1)]),
-            "left": GameEngine.noop_transform([(-1, -1, 1), (-1, -1, -1), (-1, 1, -1), (-1, 1, 1)]),
-            "up": GameEngine.noop_transform([(-1, 1, -1), (1, 1, -1), (1, 1, 1), (-1, 1, 1)]),
-            "down": GameEngine.noop_transform([(1, -1, -1), (-1, -1, -1), (-1, -1, 1), (1, -1, 1)]),
-        }[face_name]
 
         offset_list = {
-            "front": GameEngine.noop_transform([(1, 1, 1), (1, -1, 1), (-1, -1, 1), (-1, 1, 1)]),
-            "back": GameEngine.noop_transform([(-1, 1, -1), (-1, -1, -1), (1, -1, -1), (1, 1, -1)]),
-            "right": GameEngine.rotate_face_90_degrees_ccw_around_x([(1, 1, 1), (1, 1, -1), (1, -1, -1), (1, -1, 1)]),
-            "left": GameEngine.rotate_face_90_degrees_ccw_around_x([(-1, -1, 1), (-1, -1, -1), (-1, 1, -1), (-1, -1, 1)]),
-            "up": GameEngine.rotate_face_90_degrees_ccw_around_y([(-1, 1, -1), (1, 1, -1), (1, 1, 1), (-1, 1, 1)]),
-            "down": GameEngine.noop_transform([(1, -1, -1), (-1, -1, -1), (-1, -1, 1), (1, -1, 1)]),
+            "front": [(-1, 1, -1), (-1, 1, 1), (1, 1, 1), (1, 1, -1)],
+            "back": [(1, -1, -1), (1, -1, 1), (-1, -1, 1), (-1, -1, -1)],
+            "right": [(1, -1, -1), (1, 1, -1), (1, 1, 1), (1, -1, 1)],
+            "left": GameEngine.rotate_face_90_degrees_ccw_around_x([(-1, -1, -1), (-1, -1, 1), (-1, 1, 1), (-1, 1, -1)]),
+            "up": list(reversed([(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1)])),
+            "down": list(reversed([(-1, 1, 1), (1, 1, 1), (1, -1, 1), (-1, -1, 1)])),
         }[face_name]
+        
 
-        #'''
-        offset_list = {
-            "front": [(-1, 1, 1), (1, 1, 1), (1, 1, -1), (-1, 1, -1)],
-            "back": [(-1, -1, -1), (1, -1, -1), (1, -1, 1), (1, -1, -1)],
-            "right": [(1, -1, 1), (1, 1, 1), (1, 1, -1), (1, -1, -1)],
-            "left": [(-1, -1, -1), (-1, 1, -1), (-1, 1, 1), (-1, -1, 1)],
-            "up": [(-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)],
-            "down": [(-1, 1, -1), (1, 1, -1), (1, -1, -1), (-1, -1, -1)],
-         }[face_name]
-        #'''
-        '''
-        offset_list = {
-            "down": [(1, 1, 1), (1, -1, 1), (-1, -1, 1), (-1, 1, 1)],
-            "up": GameEngine.rotate_face_90_degrees_ccw_around_z([(-1, 1, -1), (-1, -1, -1), (1, -1, -1), (1, 1, -1)]),
-            "right": [(1, 1, 1), (1, 1, -1), (1, -1, -1), (1, -1, 1)],
-            "left": [(-1, -1, 1), (-1, -1, -1), (-1, 1, -1), (-1, 1, 1)],
-            "front": [(-1, 1, -1), (1, 1, -1), (1, 1, 1), (-1, 1, 1)],
-            "back": GameEngine.rotate_face_90_degrees_ccw_around_y([(1, -1, -1), (-1, -1, -1), (-1, -1, 1), (1, -1, 1)]),
-        }[face_name]
-        '''
+
+        voxel_half = voxel_size / 2
 
         # Calculate vertex positions
-        face_vertices = np.array([
-            [(x + offset[0]/2 - 1)*voxel_size, (y + offset[2]/2 - 1)*voxel_size, (z + offset[1]/2 - 1)*voxel_size]
+        face_vertices = [
+            [(x + offset[0]*voxel_half)*voxel_size, (y + offset[1]*voxel_half)*voxel_size, (z + offset[2]*voxel_half)*voxel_size]
             for offset in offset_list
-        ])
+        ]
 
-        return face_vertices
+        return np.array(face_vertices)
     
 
     @staticmethod
@@ -886,12 +783,12 @@ class GameEngine(ShowBase):
         
         # Create shifted versions of the world for all six directions
         shifts = {
-            'left':  (0, -1, 0),
-            'right': (0, 1, 0),
-            'down':  (-1, 0, 0),
-            'up':    (1, 0, 0),
-            'back':  (0, 0, -1),
-            'front': (0, 0, 1),
+            'front': (0, 1, 0),
+            'back':  (0, -1, 0),
+            'right': (1, 0, 0),
+            'left':  (-1, 0, 0),
+            'up':    (0, 0, 1),
+            'down':  (0, 0, -1),
         }
         exposed_faces = np.zeros_like(voxel_world, dtype=bool)
         
@@ -1096,6 +993,7 @@ if __name__ == "__main__":
     parser.add_argument('--terrain', action='store', default="flat")
     parser.add_argument('--texture', action='store', default="chess")
     parser.add_argument('--debug', action="store_true", default=False)
+    parser.add_argument('--normals', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
     if args.debug:
