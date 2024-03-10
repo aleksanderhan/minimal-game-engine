@@ -26,7 +26,6 @@ from panda3d.core import Vec3, TransformState
 from math import cos, sin, radians
 from panda3d.core import Texture
 import random
-from helper import build_robot, toggle
 from panda3d.bullet import BulletBoxShape
 from panda3d.bullet import BulletGenericConstraint
 from direct.gui.OnscreenImage import OnscreenImage
@@ -42,6 +41,10 @@ import time
 from multiprocessing import Pool
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
+
+from helper import toggle, VoxelTools, WorldTools
+from constants import color_normal_map
+
 
 random.seed()
 
@@ -81,7 +84,7 @@ class ChunkManager:
         
         # Use multiprocessing to generate chunks
         t0 = time.perf_counter()
-        chunk_data = self.pool.starmap(GameEngine.generate_chunk,
+        chunk_data = self.pool.starmap(WorldTools.generate_chunk,
                         [(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, x, y, self.game_engine.scale) for x, y in chunks_to_load])
 
         # Apply textures and physics sequentially
@@ -93,7 +96,7 @@ class ChunkManager:
             create_world_DT += create_world_dt
             crete_mesh_DT += crete_mesh_dt
             self.game_engine.voxel_world_map[(x, y)] = voxel_world
-            terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(x, y, vertices, indices)
+            terrainNP, terrainNode = self.game_engine.apply_texture_and_physics_to_chunk(x, y, vertices, indices)
             self.loaded_chunks[(x, y)] = (terrainNP, terrainNode, len(vertices))
 
         # Update previously_updated_position with the current player position after loading chunks
@@ -131,7 +134,8 @@ class ChunkManager:
                 # Check if the chunk is within the specified radius and not already loaded.
                 if distance_from_player <= chunk_radius and (x, y) not in self.loaded_chunks:
                     # If the chunk meets the criteria, add it to the list of chunks to load.
-                    chunks_to_load.append((x, y))
+                    if (x, y) not in self.loaded_chunks:
+                        chunks_to_load.append((x, y))
 
         # Return the list of chunks that need to be loaded.
         return chunks_to_load
@@ -165,17 +169,17 @@ class ChunkManager:
         result = 0
         for key in self.loaded_chunks.keys():
             world = self.game_engine.voxel_world_map.get(key)
-            exposed_voxels = GameEngine.identify_exposed_voxels(world)
+            exposed_voxels = VoxelTools.identify_exposed_voxels(world)
             result += np.count_nonzero(exposed_voxels)
         return result
 
 
     def load_chunk(self, chunk_x, chunk_y):
         # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
-        vertices, indices, _, _, _ = GameEngine.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
-        terrainNP, terrainNode = self.game_engine.apply_texture_and_physics(chunk_x, chunk_y, vertices, indices)
+        vertices, indices, _, _, _ = WorldTools.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
+        terrainNP, terrainNode = self.game_engine.apply_texture_and_physics_to_chunk(chunk_x, chunk_y, vertices, indices)
         # Store both components in the loaded_chunks dictionary
-        self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode)
+        self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode, len(vertices)) # TODO: Use Chunk dataclass
 
     def unload_chunk(self, chunk_x, chunk_y):
         chunk_data = self.loaded_chunks.pop((chunk_x, chunk_y), None)
@@ -186,60 +190,21 @@ class ChunkManager:
 
 
 
+class DynamicArbitraryVoxelObject:
 
+    def __init__(self):
+
+        self.object_array = None
+
+
+    @staticmethod
+    def make_single_voxel_object(position: Vec3, scale, voxel_type=1):
+        pass
 
 
 
 
 class GameEngine(ShowBase):
-
-    offset_arrays = {
-        "front": np.array([(-1, 1, -1), (-1, 1, 1), (1, 1, 1), (1, 1, -1)]),
-        "back": np.array([(1, -1, -1), (1, -1, 1), (-1, -1, 1), (-1, -1, -1)]),
-        "right": np.array([(1, -1, -1), (1, 1, -1), (1, 1, 1), (1, -1, 1)]),
-        "left": np.array([(-1, 1, -1), (-1, -1, -1), (-1, -1, 1), (-1, 1, 1)]),
-        "up": np.array([(-1, -1, 1), (1, -1, 1), (1, 1, 1), (-1, 1, 1)]),
-        "down": np.array([(-1, 1, -1), (1, 1, -1), (1, -1, -1), (-1, -1, -1)]),
-    }
-
-    uv_maps = {
-        1: {
-            "front": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
-            "back": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
-            "right": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
-            "left": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
-            "up": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
-            "down": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
-        }, 
-        1: {
-            "front": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
-            "back": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
-            "right": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
-            "left": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
-            "up": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
-            "down": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
-        },
-    }
-
-    # Define offsets for each face (adjust based on your coordinate system)
-    normals = {
-        'front':  ( 0,  1,  0),
-        'back':   (0,  -1,  0),
-        'right':  ( 1,  0,  0),
-        'left':   ( -1, 0,  0),
-        'up':   ( 0,  0, -1),
-        'down':     ( 0,  0,  1),
-    }
-
-    color_normal_map = {
-        (0, 1, 0): (1, 0, 0, 1), # red - front
-        (0, -1, 0): (0, 1, 0, 1), # green - back
-        (1, 0, 0): (0, 0, 1, 1), # blue - right
-        (-1, 0, 0): (1, 1, 0, 1), # yellow -left
-        (0, 0, 1): (0, 1, 1, 1), # cyan - up
-        (0, 0, -1): (1, 0, 1, 1)  # magenta -down
-    }
-
 
     def __init__(self, args):
         super().__init__()
@@ -296,21 +261,21 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.name == "Terrain":
-                self.create_static_voxel(hit_pos, self.scale)
+                self.create_static_voxel(hit_pos)
             elif hit_node.name == "Voxel":
-                face_center = self.get_face_center_from_hit(raycast_result, self.scale)
+                face_center = self.get_face_center_from_hit(raycast_result)
                 offset = self.scale / 2
                 if hit_node.static:
-                    self.create_static_voxel(face_center + hit_normal * offset, self.scale)
+                    self.create_static_voxel(face_center + hit_normal * offset)
                 else:
-                    self.create_dynamic_voxel(face_center + hit_normal * offset, self.scale)
+                    self.create_dynamic_voxel(face_center + hit_normal * offset)
 
         else:
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
-            self.create_static_voxel(position, self.scale)
+            self.create_static_voxel(position)
 
     def create_dynamic_voxel(self, position: Vec3, voxel_type: int=1):
         # TODO implement
@@ -318,14 +283,21 @@ class GameEngine(ShowBase):
 
 
     def create_static_voxel(self, position: Vec3, voxel_type: int=1):
-        # Convert global position to chunk coordinates
-        chunk_x = int(position.x) // self.chunk_size
-        chunk_y = int(position.y) // self.chunk_size
+        print("creating static voxel, position:", position)
+        #  position = Vec3(position.y, -position.x, position.z)
+        # Calculate chunk positions based on global position
+        chunk_x = int(position.x / (self.chunk_size * self.scale))
+        chunk_y = int(position.y / (self.chunk_size * self.scale))
 
-        # Convert global position to local voxel coordinates within the chunk
-        voxel_x = int(position.x) % self.chunk_size
-        voxel_y = int(position.y) % self.chunk_size
-        voxel_z = max(int(position.z) - self.ground_height, 0)  # Ensure z is non-negative
+        # Calculate local voxel coordinates within the chunk
+        local_x = position.x % (self.chunk_size * self.scale)
+        local_y = position.y % (self.chunk_size * self.scale)
+        voxel_x = int(local_x / self.scale)
+        voxel_y = int(local_y / self.scale)
+        voxel_z = int(position.z / self.scale)
+
+        print("x:", voxel_x, "y:", voxel_y, "z:", voxel_z)
+
 
         # Retrieve the voxel world for the specified chunk
         voxel_world = self.voxel_world_map.get((chunk_x, chunk_y))
@@ -338,18 +310,18 @@ class GameEngine(ShowBase):
         else:
             print(f"Voxel z-coordinate {voxel_z} is out of bounds.")
 
-    def get_face_center_from_hit(self, raycast_result, voxel_size=1):
+    def get_face_center_from_hit(self, raycast_result):
         hit_normal = raycast_result.getHitNormal()
         node_path = raycast_result.getNode().getPythonTag("nodePath") # TODO: FIx path
         voxel_position = node_path.getPos()  # World position of the voxel's center
 
         # Calculate face center based on the hit normal
         if abs(hit_normal.x) > 0.5:  # Hit on X-face
-            face_center = voxel_position + Vec3(hit_normal.x * voxel_size / 2, 0, 0)
+            face_center = voxel_position + Vec3(hit_normal.x * self.scale / 2, 0, 0)
         elif abs(hit_normal.y) > 0.5:  # Hit on Y-face
-            face_center = voxel_position + Vec3(0, hit_normal.y * voxel_size / 2, 0)
+            face_center = voxel_position + Vec3(0, hit_normal.y * self.scale / 2, 0)
         else:  # Hit on Z-face
-            face_center = voxel_position + Vec3(0, 0, hit_normal.z * voxel_size / 2)
+            face_center = voxel_position + Vec3(0, 0, hit_normal.z * self.scale / 2)
 
         return face_center
     
@@ -374,60 +346,9 @@ class GameEngine(ShowBase):
         end_point = cam_pos + cam_dir * distance  # Adjust the distance as needed
         
         # Perform the raycast
-        return self.physicsWorld.rayTestClosest(start_point, end_point)
-        
-    @staticmethod
-    def get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y):
-        if (chunk_x, chunk_y) not in voxel_world_map:
-            width = chunk_size
-            depth = chunk_size
-            
-            # Initialize an empty voxel world with air (0)
-            voxel_world = np.zeros((width, depth, max_height), dtype=int)
-            
-            # Generate or retrieve heightmap for this chunk
-            #heightmap = GameEngine.generate_flat_height_map(chunk_size, height=3)
-            heightmap = GameEngine.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
-            
-            # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
-            height_levels = np.floor(heightmap).astype(int)
-            height_levels = np.clip(height_levels, 1, max_height)
-            adjusted_height_levels = height_levels[:-1, :-1]
+        return self.physicsWorld.rayTestClosest(start_point, end_point)      
 
-            # Initialize the voxel world as zeros
-            voxel_world = np.zeros((width, depth, max_height), dtype=int)
-
-            # Create a 3D array representing each voxel's vertical index (Z-coordinate)
-            z_indices = np.arange(max_height).reshape(1, 1, max_height)
-
-            # Create a 3D boolean mask where true indicates a voxel should be set to rock (1)
-            mask = z_indices < adjusted_height_levels[:,:,np.newaxis]
-
-            # Apply the mask to the voxel world
-            voxel_world[mask] = 1
-
-
-            #voxel_world = np.zeros((5, 5, 5), dtype=int)
-            #voxel_world[1, 0, 1] = 1    
-            #voxel_world[1, 1, 1] = 1
-
-            voxel_world_map[(chunk_x, chunk_y)] = voxel_world
-
-            return voxel_world
-
-        return voxel_world_map.get((chunk_x, chunk_y))
-
-    @staticmethod
-    def generate_chunk(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, scale):
-        t0 = time.perf_counter()
-        voxel_world = GameEngine.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
-        t1 = time.perf_counter()
-        vertices, indices = GameEngine.create_mesh_data(voxel_world, scale)
-        t2 = time.perf_counter()
-        return vertices, indices, voxel_world, t1-t0, t2-t1
-        
-
-    def apply_texture_and_physics(self, chunk_x, chunk_y, vertices, indices):
+    def apply_texture_and_physics_to_chunk(self, chunk_x, chunk_y, vertices, indices):
         terrainNP = self.apply_textures_to_voxels(vertices, indices)
         
         if self.args.normals:
@@ -436,7 +357,7 @@ class GameEngine(ShowBase):
         # Position the flat terrain chunk according to its world coordinates
         world_x = chunk_x * self.chunk_size * self.scale
         world_y = chunk_y * self.chunk_size * self.scale
-        terrainNode = self.add_mesh_to_physics(vertices, indices, world_x, world_y)
+        terrainNode = self.add_terrain_mesh_to_physics(vertices, indices, world_x, world_y)
         terrainNP.setPos(world_x, world_y, 0)
 
         return terrainNP, terrainNode
@@ -509,8 +430,7 @@ class GameEngine(ShowBase):
     def apply_textures_to_voxels(self, vertices, indices):
         texture_atlas = self.loader.loadTexture("texture_atlas.png")
         format = GeomVertexFormat.getV3n3t2()  # Ensure format includes texture coordinates
-        #vdata = GeomVertexData('voxel_data', format, Geom.UHStatic)
-        vdata = GeomVertexData('voxel_data', GameEngine.ensure_vertex_format_with_color(), Geom.UHStatic)
+        vdata = GeomVertexData('voxel_data', GameEngine.vertex_format_with_color(), Geom.UHStatic)
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
         normal_writer = GeomVertexWriter(vdata, 'normal')
@@ -523,7 +443,7 @@ class GameEngine(ShowBase):
             texcoord_writer.addData2f(vertices[i+6], vertices[i+7])
 
             dx, dy, dz = vertices[i+3], vertices[i+4], vertices[i+5]
-            color = GameEngine.color_normal_map[(dx, dy, dz)]
+            color = color_normal_map[(dx, dy, dz)]
             color_writer.addData4f(color)
 
         # Create triangles using indices
@@ -547,7 +467,7 @@ class GameEngine(ShowBase):
         return geom_np
     
     @staticmethod
-    def ensure_vertex_format_with_color():
+    def vertex_format_with_color():
         # Define a vertex array format that includes position, normal, color, and texture
         array_format = GeomVertexArrayFormat()
         array_format.addColumn("vertex", 3, Geom.NTFloat32, Geom.CPoint)
@@ -617,140 +537,7 @@ class GameEngine(ShowBase):
         world_y = chunk_y * self.chunk_size * scale
         return world_x, world_y
 
-    @staticmethod
-    def check_surrounding_air(voxel_world, x, y, z):
-        """
-        Check each of the six directions around a point (x, y, z) in the voxel world
-        for air (assumed to be represented by 0), including the boundary air of the world.
-        """
-        # Define the world's size
-        max_x, max_y, max_z = voxel_world.shape[0] - 1, voxel_world.shape[1] - 1, voxel_world.shape[2] - 1
-
-        # Initialize a list to store the names of faces exposed to air, including boundaries
-        exposed_faces = []
-
-        # Check each direction, directly considering the boundaries of the world
-        if x == max_x or voxel_world[min(x + 1, max_x), y, z] == 0: exposed_faces.append("right")
-        if x == 0 or voxel_world[max(x - 1, 0), y, z] == 0: exposed_faces.append("left")
-        if y == max_y or voxel_world[x, min(y + 1, max_y), z] == 0: exposed_faces.append("front")
-        if y == 0 or voxel_world[x, max(y - 1, 0), z] == 0: exposed_faces.append("back")
-        if z == max_z or voxel_world[x, y, min(z + 1, max_z)] == 0: exposed_faces.append("up")
-        if z == 0 or voxel_world[x, y, max(z - 1, 0)] == 0: exposed_faces.append("down")
-
-        return exposed_faces
-
-
-    @staticmethod
-    def create_mesh_data(voxel_world, voxel_size):
-        """Efficiently creates mesh data for exposed voxel faces.
-
-        Args:
-            voxel_world: 3D NumPy array representing voxel types.
-            voxel_size: The size of each voxel in world units.
-
-        Returns:
-                vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
-                indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
-        """
-
-        exposed_voxels = GameEngine.identify_exposed_voxels(voxel_world)
-
-        vertices = []
-        indices = []
-        index_counter = 0  # Track indices for each exposed face
-
-        exposed_indices = np.argwhere(exposed_voxels)
-        
-        for x, y, z in exposed_indices:
-            exposed_faces = GameEngine.check_surrounding_air(voxel_world, x, y, z)
-            j = 0
-            for face_name, normal in GameEngine.normals.items():
-                if face_name in exposed_faces:
-                    # Generate vertices for this face
-                    face_vertices = GameEngine.generate_face_vertices(x, y, z, face_name, voxel_size)
-                    face_normals = np.tile(np.array(normal), (4, 1))
-
-                    voxel_type = voxel_world[x, y, z]
-                    uvs = GameEngine.uv_maps[voxel_type][face_name]
-
-                    u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
-
-                    # Append generated vertices, normals, and texture coordinates to the list
-                    for fv, fn in zip(face_vertices, face_normals):
-                        vertices.extend([*fv, *fn, u, v])
-                    
-                    # Create indices for two triangles making up the face
-                    indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-                        index_counter + 2, index_counter + 3, index_counter])
-                    
-                    index_counter += 4
-                    j += 1
-        
-        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
-    
-    @staticmethod
-    def generate_face_vertices(x, y, z, face_name, voxel_size):
-        """
-        Generates vertices and normals for a given voxel face.
-
-        Args:
-            x, y, z: Coordinates of the voxel in the voxel grid.
-            face_name: The face to be generated
-            voxel_size: Size of the voxel.
-
-        Returns:
-            face_vertices: A list of vertex positions for the face.
-        """
-        face_offsets = GameEngine.offset_arrays[face_name]
-
-        # Calculate vertex positions vectorized
-        face_vertices = (np.array([x, y, z]) + face_offsets * voxel_size).astype(float)
-
-        return face_vertices
-    
-
-    @staticmethod
-    def noop_transform(face):
-        return face
-    
-    @staticmethod
-    def rotate_face_90_degrees_ccw_around_z(face):
-        # Rotate each point in the face 90 degrees counter-clockwise around the Z axis
-        return [(y, -x, z) for x, z, y in face]
-    
-    @staticmethod
-    def rotate_face_90_degrees_ccw_around_x(face):
-        # Rotate each point in the face 90 degrees counter-clockwise around the X axis
-        return [(x, -z, y) for x, y, z in face]
-
-    @staticmethod
-    def rotate_face_90_degrees_ccw_around_y(face):
-        # Rotate each point in the face 90 degrees counter-clockwise around the Y axis
-        return [(z, y, -x) for x, y, z in face]
-
-    
-    @staticmethod
-    def identify_exposed_voxels(voxel_world):
-        """
-        Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
-        True means it is exposed to air, False means it's not.
-
-        Parameters:
-            - voxel_world: a 3D numpy array representing the voxel types as integers in the world
-        """
-        # Pad the voxel world with zeros (air) on all sides
-        padded_world = np.pad(voxel_world, pad_width=1, mode='constant', constant_values=0)
-        
-        exposed_faces = np.zeros_like(voxel_world, dtype=bool)
-        
-        for direction, (dx, dy, dz) in GameEngine.normals.items():
-            shifted_world = np.roll(padded_world, shift=(dx, dy, dz), axis=(0, 1, 2))
-            # Expose face if there's air next to it (voxel value of 0 in the shifted world)
-            exposed_faces |= ((shifted_world[1:-1, 1:-1, 1:-1] == 0) & (voxel_world > 0))
-        
-        return exposed_faces
-
-    def add_mesh_to_physics(self, vertices, indices, world_x, world_y):
+    def add_terrain_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
         
         # Loop through the indices to get triangles. Since vertices now include texture coords,
@@ -774,47 +561,6 @@ class GameEngine(ShowBase):
         terrainNP.setPos(world_x, world_y, 0)
         self.physicsWorld.attachRigidBody(terrainNode)
         return terrainNode
-    
-    @staticmethod
-    def generate_perlin_height_map(chunk_size, chunk_x, chunk_y):
-        scale = 0.05  # Adjust scale to control the "zoom" level of the noise
-        octaves = 6  # Number of layers of noise to combine
-        persistence = 0.5  # Amplitude of each octave
-        lacunarity = 2.0  # Frequency of each octave
-
-        height_map = np.zeros((chunk_size + 1, chunk_size + 1))
-
-        # Calculate global offsets
-        global_offset_x = chunk_x * chunk_size
-        global_offset_y = chunk_y * chunk_size
-
-        for x in range(chunk_size + 1):
-            for y in range(chunk_size + 1):
-                # Calculate global coordinates
-                global_x = (global_offset_x + x) * scale
-                global_y = (global_offset_y + y) * scale
-
-                # Generate height using Perlin noise
-                height = noise.pnoise2(global_x, global_y,
-                                    octaves=octaves,
-                                    persistence=persistence,
-                                    lacunarity=lacunarity,
-                                    repeatx=10000,  # Large repeat region to avoid repetition
-                                    repeaty=10000,
-                                    base=1)  # Base can be any constant, adjust for different terrains
-
-                # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 30
-
-        return height_map
-    
-    @staticmethod
-    def generate_flat_height_map(board_size, height=1):
-        # Adjust board_size to account for the extra row and column for seamless edges
-        adjusted_size = board_size + 1
-        # Create a 2D NumPy array filled with the specified height value
-        height_map = np.full((adjusted_size, adjusted_size), height)
-        return height_map
 
     def setup_crosshair(self):
         # Path to the crosshair image
