@@ -2,6 +2,13 @@ import numpy as np
 import noise
 import time
 
+from panda3d.bullet import (
+    BulletRigidBodyNode, BulletTriangleMesh, BulletTriangleMeshShape, BulletSphereShape
+)
+from panda3d.core import (
+    Vec3
+)
+
 from constants import offset_arrays, normals, uv_maps
 
 
@@ -12,7 +19,85 @@ def toggle(a, b, yield_a=True):
         yield_a = not yield_a
 
 
+class DynamicArbitraryVoxelObject:
+
+    def __init__(self, object_array, vertices, indices, mass, name="object"):
+        self.object_array = object_array
+        self.vertices = vertices
+        self.indices = indices
+        self.name = name
+        self.mass = mass
+        self.object_np = None
+        self.object_node = None
+
+    @staticmethod
+    def make_single_voxel_object(position: Vec3, scale: int, voxel_type: int=1, mass: int=1):
+        object_array = np.zeros((1, 1, 1), dtype=int)
+        vertices, indices = VoxelTools.create_voxel_mesh(position, voxel_type, scale)
+        return DynamicArbitraryVoxelObject(object_array, vertices, indices, mass)
+    
+
 class VoxelTools:
+
+    @staticmethod
+    def create_dynamic_voxel_physics_node(object: DynamicArbitraryVoxelObject, scale):
+        shape = BulletSphereShape(scale)
+        node = BulletRigidBodyNode(object.name)
+        node.setMass(object.mass)
+        node.addShape(shape)
+        return node
+    
+    @staticmethod
+    def create_dynamic_voxel_physics_node_mesh(object: DynamicArbitraryVoxelObject):
+        mesh = BulletTriangleMesh()
+        
+        # Loop through the indices to get triangles. Since vertices now include texture coords,
+        # extract only the position data (first three components) for BulletPhysics.
+        for i in range(0, len(object.indices), 3):
+            idx0, idx1, idx2 = object.indices[i] * 8, object.indices[i+1] * 8, object.indices[i+2] * 8
+            
+            # Extract the position data from the flattened vertices array.
+            v0 = object.vertices[idx0:idx0+3]  # Extracts x, y, z for vertex 0
+            v1 = object.vertices[idx1:idx1+3]  # Extracts x, y, z for vertex 1
+            v2 = object.vertices[idx2:idx2+3]  # Extracts x, y, z for vertex 2
+            
+            # Add the triangle to the mesh.
+            mesh.addTriangle(Vec3(*v0), Vec3(*v1), Vec3(*v2))
+
+        shape = BulletTriangleMeshShape(mesh, dynamic=True)
+        node = BulletRigidBodyNode(object.name)
+        node.setMass(object.mass)
+        node.addShape(shape)
+        return node
+    
+    @staticmethod
+    def create_voxel_mesh(position, voxel_type, scale):
+        vertices = []
+        indices = []
+        index_counter = 0
+
+        j = 0
+        for face_name, normal in normals.items():
+            # Generate vertices for this face
+            face_vertices = VoxelTools.generate_face_vertices(*position, face_name, scale)
+            face_normals = np.tile(np.array(normal), (4, 1))
+
+            uvs = uv_maps[voxel_type][face_name]
+
+            u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
+
+            # Append generated vertices, normals, and texture coordinates to the list
+            for fv, fn in zip(face_vertices, face_normals):
+                vertices.extend([*fv, *fn, u, v])
+            
+            # Create indices for two triangles making up the face
+            indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+                index_counter + 2, index_counter + 3, index_counter])
+            
+            index_counter += 4
+            j += 1
+
+        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
 
     @staticmethod
     def check_surrounding_air(voxel_world, x, y, z):
@@ -36,54 +121,6 @@ class VoxelTools:
 
         return exposed_faces
 
-
-    @staticmethod
-    def create_world_mesh(voxel_world, voxel_size):
-        """Efficiently creates mesh data for exposed voxel faces.
-
-        Args:
-            voxel_world: 3D NumPy array representing voxel types.
-            voxel_size: The size of each voxel in world units.
-
-        Returns:
-                vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
-                indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
-        """
-
-        exposed_voxels = VoxelTools.identify_exposed_voxels(voxel_world)
-
-        vertices = []
-        indices = []
-        index_counter = 0  # Track indices for each exposed face
-
-        exposed_indices = np.argwhere(exposed_voxels)
-        
-        for x, y, z in exposed_indices:
-            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, x, y, z)
-            j = 0
-            for face_name, normal in normals.items():
-                if face_name in exposed_faces:
-                    # Generate vertices for this face
-                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, voxel_size)
-                    face_normals = np.tile(np.array(normal), (4, 1))
-
-                    voxel_type = voxel_world[x, y, z]
-                    uvs = uv_maps[voxel_type][face_name]
-
-                    u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
-
-                    # Append generated vertices, normals, and texture coordinates to the list
-                    for fv, fn in zip(face_vertices, face_normals):
-                        vertices.extend([*fv, *fn, u, v])
-                    
-                    # Create indices for two triangles making up the face
-                    indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
-                        index_counter + 2, index_counter + 3, index_counter])
-                    
-                    index_counter += 4
-                    j += 1
-        
-        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
     def generate_face_vertices(x, y, z, face_name, voxel_size):
@@ -155,9 +192,57 @@ class WorldTools:
         t0 = time.perf_counter()
         voxel_world = WorldTools.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
         t1 = time.perf_counter()
-        vertices, indices = VoxelTools.create_world_mesh(voxel_world, scale)
+        vertices, indices = WorldTools.create_world_mesh(voxel_world, scale)
         t2 = time.perf_counter()
         return vertices, indices, voxel_world, t1-t0, t2-t1
+    
+    @staticmethod
+    def create_world_mesh(voxel_world, scale):
+        """Efficiently creates mesh data for exposed voxel faces.
+
+        Args:
+            voxel_world: 3D NumPy array representing voxel types.
+            scale: The size of each voxel in world units.
+
+        Returns:
+                vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
+                indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
+        """
+
+        exposed_voxels = VoxelTools.identify_exposed_voxels(voxel_world)
+
+        vertices = []
+        indices = []
+        index_counter = 0  # Track indices for each exposed face
+
+        exposed_indices = np.argwhere(exposed_voxels)
+        
+        for x, y, z in exposed_indices:
+            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, x, y, z)
+            j = 0
+            for face_name, normal in normals.items():
+                if face_name in exposed_faces:
+                    # Generate vertices for this face
+                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, scale)
+                    face_normals = np.tile(np.array(normal), (4, 1))
+
+                    voxel_type = voxel_world[x, y, z]
+                    uvs = uv_maps[voxel_type][face_name]
+
+                    u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
+
+                    # Append generated vertices, normals, and texture coordinates to the list
+                    for fv, fn in zip(face_vertices, face_normals):
+                        vertices.extend([*fv, *fn, u, v])
+                    
+                    # Create indices for two triangles making up the face
+                    indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+                        index_counter + 2, index_counter + 3, index_counter])
+                    
+                    index_counter += 4
+                    j += 1
+        
+        return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
     def get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y):

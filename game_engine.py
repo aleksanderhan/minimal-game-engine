@@ -38,11 +38,11 @@ from panda3d.bullet import BulletGhostNode
 from scipy.interpolate import interp2d
 from PIL import Image
 import time
-from multiprocessing import Pool
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
 
-from helper import toggle, VoxelTools, WorldTools
+from chunk_manager import ChunkManager
+from helper import toggle, VoxelTools, WorldTools, DynamicArbitraryVoxelObject
 from constants import color_normal_map
 
 
@@ -53,155 +53,32 @@ loadPrcFileData("", "bullet-enable-contact-events true")
 loadPrcFileData('', 'win-size 1680 1050')
 loadPrcFileData("", "threading-model Cull/Draw")
 
-class ChunkManager:
+
+class ObjectManager:
+
     def __init__(self, game_engine):
         self.game_engine = game_engine
-        self.loaded_chunks = {}
-        self.pool = Pool(processes=6)
-        self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 8
-        self.chunk_radius = 12
-        self.num_chunks = 4*int(3.14*self.chunk_radius**2)
+        self.objects = []
 
-    def get_player_chunk_pos(self):
-        player_pos = self.game_engine.camera.getPos()
-        chunk_x = int(player_pos.x / self.game_engine.scale) // self.game_engine.chunk_size
-        chunk_y = int(player_pos.y / self.game_engine.scale) // self.game_engine.chunk_size
-        return chunk_x, chunk_y
+    def register_object(self, object, position):
+        self.objects.append(object)
 
-    def update_chunks(self):
-        T0 = time.perf_counter()
-        player_chunk_x, player_chunk_y = self.get_player_chunk_pos()
-
-
-        if self.previously_updated_position: 
-            distance_from_center = ((player_chunk_x - self.previously_updated_position[0])**2 + 
-                                    (player_chunk_y - self.previously_updated_position[1])**2)**0.5
-            if distance_from_center <= self.inner_radius:
-                return  # Player still within inner radius, no loading needed
-            
-        chunks_to_load = self.identify_chunks_to_load(player_chunk_x, player_chunk_y, self.chunk_radius)
-        
-        # Use multiprocessing to generate chunks
-        t0 = time.perf_counter()
-        chunk_data = self.pool.starmap(WorldTools.generate_chunk,
-                        [(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, x, y, self.game_engine.scale) for x, y in chunks_to_load])
-
-        # Apply textures and physics sequentially
-        t1 = time.perf_counter()
-
-        create_world_DT = 0
-        crete_mesh_DT = 0
-        for (x, y), (vertices, indices, voxel_world, create_world_dt, crete_mesh_dt) in zip(chunks_to_load, chunk_data):
-            create_world_DT += create_world_dt
-            crete_mesh_DT += crete_mesh_dt
-            self.game_engine.voxel_world_map[(x, y)] = voxel_world
-            terrainNP, terrainNode = self.game_engine.apply_texture_and_physics_to_chunk(x, y, vertices, indices)
-            self.loaded_chunks[(x, y)] = (terrainNP, terrainNode, len(vertices))
-
-        # Update previously_updated_position with the current player position after loading chunks
-        self.previously_updated_position = (player_chunk_x, player_chunk_y)
-
-        t2 = time.perf_counter()
-        # Unload chunks outside the new radius
-        self.unload_chunks_furthest_away(player_chunk_x, player_chunk_y, self.chunk_radius)
-        t3 = time.perf_counter()
+        geom_np = GameEngine.create_geometry(object.vertices, object.indices)
+        geom_np.setTexture(self.game_engine.texture_atlas)
+        geom_np.reparentTo(self.game_engine.render)
 
         if self.game_engine.args.debug:
-            print(f"Generated chunk mesh data in {t1-t0}")
-            print(f"    Created world in {create_world_DT}")
-            print(f"    Created mesh in {crete_mesh_DT}")
-            print(f"Loaded texture and physics in {t2-t1}")
-            print(f"Unloaded chunks in {t3-t2}")
-            print(f"Loaded vertices: {self.get_number_of_loaded_vertices()}")
-            print(f"Number of visible voxels: {self.get_number_of_visible_voxels()}")
+            geom_np.setLightOff()
 
-        DT = time.perf_counter() - T0
-        print(f"Loaded chunks in {DT}")
-        print()
+        object.object_node = VoxelTools.create_dynamic_voxel_physics_node(object, self.game_engine.scale)
 
-    def identify_chunks_to_load(self, player_chunk_x, player_chunk_y, chunk_radius):
-        # Initialize an empty list to store the coordinates of chunks that need to be loaded.
-        chunks_to_load = []
+        object.object_np = self.game_engine.render.attachNewNode(object.object_node)
+        object.object_np.setPythonTag("object", object)
+        object.object_np.setPos(position)
 
-        # Iterate through all possible chunk coordinates around the player within the chunk_radius.
-        for x in range(player_chunk_x - chunk_radius, player_chunk_x + chunk_radius + 1):
-            for y in range(player_chunk_y - chunk_radius, player_chunk_y + chunk_radius + 1):
-                
-                # Calculate the distance from the current chunk to the player's chunk position.
-                distance_from_player = ((x - player_chunk_x)**2 + (y - player_chunk_y)**2)**0.5
-                
-                # Check if the chunk is within the specified radius and not already loaded.
-                if distance_from_player <= chunk_radius and (x, y) not in self.loaded_chunks:
-                    # If the chunk meets the criteria, add it to the list of chunks to load.
-                    if (x, y) not in self.loaded_chunks:
-                        chunks_to_load.append((x, y))
+        geom_np.reparentTo(object.object_np)
 
-        # Return the list of chunks that need to be loaded.
-        return chunks_to_load
-
-    def unload_chunks_furthest_away(self, player_chunk_x, player_chunk_y, chunk_radius):
-        # Calculate distance for each loaded chunk and keep track of their positions and distances
-        chunk_distances = [
-            (chunk_pos, ((chunk_pos[0] - player_chunk_x)**2 + (chunk_pos[1] - player_chunk_y)**2))
-            for chunk_pos in self.loaded_chunks.keys()
-        ]
-        
-        # Sort chunks by their distance in descending order (furthest first)
-        chunk_distances.sort(key=lambda x: x[1], reverse=True)
-        
-        # Select the furthest self.num_chunks to unload
-        chunks_to_unload = list(filter(lambda x: x[1] > chunk_radius, chunk_distances[:len(self.loaded_chunks) - self.num_chunks]))
-        
-        # Unload these chunks
-        for chunk_pos, _ in chunks_to_unload:
-            self.unload_chunk(*chunk_pos)
-            
-        print(f"Unloaded {len(chunks_to_unload)} furthest chunks.")
-        
-    def get_number_of_loaded_vertices(self):
-        result = 0
-        for _, _, num_vertices in self.loaded_chunks.values():
-            result += num_vertices
-        return result
-    
-    def get_number_of_visible_voxels(self):
-        result = 0
-        for key in self.loaded_chunks.keys():
-            world = self.game_engine.voxel_world_map.get(key)
-            exposed_voxels = VoxelTools.identify_exposed_voxels(world)
-            result += np.count_nonzero(exposed_voxels)
-        return result
-
-
-    def load_chunk(self, chunk_x, chunk_y):
-        # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
-        vertices, indices, _, _, _ = WorldTools.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
-        terrainNP, terrainNode = self.game_engine.apply_texture_and_physics_to_chunk(chunk_x, chunk_y, vertices, indices)
-        # Store both components in the loaded_chunks dictionary
-        self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode, len(vertices)) # TODO: Use Chunk dataclass
-
-    def unload_chunk(self, chunk_x, chunk_y):
-        chunk_data = self.loaded_chunks.pop((chunk_x, chunk_y), None)
-        if chunk_data:
-            terrainNP, terrainNode, _ = chunk_data
-            terrainNP.removeNode()
-            self.game_engine.physicsWorld.removeRigidBody(terrainNode)
-
-
-
-class DynamicArbitraryVoxelObject:
-
-    def __init__(self):
-
-        self.object_array = None
-
-
-    @staticmethod
-    def make_single_voxel_object(position: Vec3, scale, voxel_type=1):
-        pass
-
-
+        self.game_engine.physicsWorld.attachRigidBody(object.object_node)
 
 
 class GameEngine(ShowBase):
@@ -209,6 +86,7 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
+        self.texture_atlas = self.loader.loadTexture("texture_atlas.png")
 
         #self.render.setTwoSided(True)
         
@@ -218,6 +96,7 @@ class GameEngine(ShowBase):
         self.chunk_size = 8
 
         self.chunk_manager = ChunkManager(self)
+        self.object_manager = ObjectManager(self)
         self.voxel_world_map = {}
         self.texture_paths = {
             "stone": "assets/stone.jpeg",
@@ -249,8 +128,8 @@ class GameEngine(ShowBase):
 
     def setup_environment(self):
         #build_robot(self.physicsWorld)
-        pass
-    
+        pass        
+        
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
 
@@ -275,12 +154,12 @@ class GameEngine(ShowBase):
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
             position = self.camera.getPos() + forward_vec * 10
-            self.create_static_voxel(position)
+            self.create_dynamic_voxel(position)
 
     def create_dynamic_voxel(self, position: Vec3, voxel_type: int=1):
-        # TODO implement
-        pass
-
+        print("creating dynamic voxel, position:", position)
+        object = DynamicArbitraryVoxelObject.make_single_voxel_object(position, self.scale, voxel_type, mass=1)
+        self.object_manager.register_object(object, position)
 
     def create_static_voxel(self, position: Vec3, voxel_type: int=1):
         print("creating static voxel, position:", position)
@@ -349,18 +228,23 @@ class GameEngine(ShowBase):
         return self.physicsWorld.rayTestClosest(start_point, end_point)      
 
     def apply_texture_and_physics_to_chunk(self, chunk_x, chunk_y, vertices, indices):
-        terrainNP = self.apply_textures_to_voxels(vertices, indices)
+        terrain_np = GameEngine.create_geometry(vertices, indices)
+        terrain_np.setTexture(self.texture_atlas)
+        terrain_np.reparentTo(self.render)
+
+        if self.args.debug:
+            terrain_np.setLightOff()
         
         if self.args.normals:
-            self.visualize_normals(terrainNP, chunk_x, chunk_y)
+            self.visualize_normals(terrain_np, chunk_x, chunk_y)
 
         # Position the flat terrain chunk according to its world coordinates
         world_x = chunk_x * self.chunk_size * self.scale
         world_y = chunk_y * self.chunk_size * self.scale
-        terrainNode = self.add_terrain_mesh_to_physics(vertices, indices, world_x, world_y)
-        terrainNP.setPos(world_x, world_y, 0)
+        terrain_node = self.add_terrain_mesh_to_physics(vertices, indices, world_x, world_y)
+        terrain_np.setPos(world_x, world_y, 0)
 
-        return terrainNP, terrainNode
+        return terrain_np, terrain_node
 
     def setup_lighting(self):
         self.setBackgroundColor(0.53, 0.81, 0.98, 1)  # Set the background to light blue
@@ -427,9 +311,8 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
-    def apply_textures_to_voxels(self, vertices, indices):
-        texture_atlas = self.loader.loadTexture("texture_atlas.png")
-        format = GeomVertexFormat.getV3n3t2()  # Ensure format includes texture coordinates
+    @staticmethod
+    def create_geometry(vertices, indices, name="geom_node"):
         vdata = GeomVertexData('voxel_data', GameEngine.vertex_format_with_color(), Geom.UHStatic)
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
@@ -455,15 +338,10 @@ class GameEngine(ShowBase):
         geom = Geom(vdata)
         geom.addPrimitive(tris)
 
-        geom_node = GeomNode('voxel_geom')
+        geom_node = GeomNode(name)
         geom_node.addGeom(geom)
+
         geom_np = NodePath(geom_node)
-        geom_np.setTexture(texture_atlas)
-        geom_np.reparentTo(self.render)
-
-        if self.args.debug:
-            geom_np.setLightOff()
-
         return geom_np
     
     @staticmethod
@@ -536,7 +414,7 @@ class GameEngine(ShowBase):
         world_x = chunk_x * self.chunk_size * scale
         world_y = chunk_y * self.chunk_size * scale
         return world_x, world_y
-
+    
     def add_terrain_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
         
