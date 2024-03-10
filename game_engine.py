@@ -56,9 +56,9 @@ class ChunkManager:
         self.loaded_chunks = {}
         self.pool = Pool(processes=6)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
-        self.inner_radius = 10
-        self.chunk_radius = 15
-        self.num_chunks = 3*int(3.14*self.chunk_radius**2)
+        self.inner_radius = 8
+        self.chunk_radius = 16
+        self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):
         player_pos = self.game_engine.camera.getPos()
@@ -189,7 +189,7 @@ class GameEngine(ShowBase):
         self.scale = 1
         self.ground_height = 0
         self.max_height = 50
-        self.chunk_size = 5
+        self.chunk_size = 4
 
         self.chunk_manager = ChunkManager(self)
         self.voxel_world_map = {}
@@ -347,9 +347,9 @@ class GameEngine(ShowBase):
 
 
             #voxel_world = np.zeros((5, 5, 5), dtype=int)
-            #voxel_world[1, 1, 1] = 1    
-            #voxel_world[1, 1, 0] = 1    
-            
+            #voxel_world[1, 0, 1] = 1    
+            #voxel_world[1, 1, 1] = 1
+
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
 
             return voxel_world
@@ -731,9 +731,9 @@ class GameEngine(ShowBase):
             "front": [(-1, 1, -1), (-1, 1, 1), (1, 1, 1), (1, 1, -1)],
             "back": [(1, -1, -1), (1, -1, 1), (-1, -1, 1), (-1, -1, -1)],
             "right": [(1, -1, -1), (1, 1, -1), (1, 1, 1), (1, -1, 1)],
-            "left": GameEngine.rotate_face_90_degrees_ccw_around_x([(-1, -1, -1), (-1, -1, 1), (-1, 1, 1), (-1, 1, -1)]),
-            "up": list(reversed([(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1)])),
-            "down": list(reversed([(-1, 1, 1), (1, 1, 1), (1, -1, 1), (-1, -1, 1)])),
+            "left": [(-1, 1, -1), (-1, -1, -1), (-1, -1, 1), (-1, 1, 1)],
+            "up": list(reversed([(-1, 1, 1), (1, 1, 1), (1, -1, 1), (-1, -1, 1)])),
+            "down": list(reversed([(-1, -1, -1), (1, -1, -1), (1, 1, -1), (-1, 1, -1)])),
         }[face_name]
         
 
