@@ -198,22 +198,15 @@ class GameEngine(ShowBase):
         voxel_x = int(position.x + normal.x)
         voxel_y = int(position.y + normal.y)
         voxel_z = int(position.z + normal.z)
-
-        offset = self.chunk_size// 2
-        print("offset", offset)
-        voxel_i = voxel_x + offset
-        voxel_j = voxel_y + offset
-        voxel_k = voxel_z
         
         print("voxel_x:", voxel_x, "voxel_y:", voxel_y, "voxel_z:", voxel_z)
-        print("voxel_i:", voxel_i, "voxel_j:", voxel_j, "voxel_k:", voxel_k)
         print()
 
-        
+        x, y, z = WorldTools.map_coords_to_indices(voxel_x, voxel_y, voxel_z, self.scale, self.chunk_size)
 
         try:
             # Set the voxel type at the calculated local coordinates
-            voxel_world[voxel_i, voxel_j, voxel_k] = voxel_type
+            voxel_world[x, y, z] = voxel_type
             self.chunk_manager.load_chunk(chunk_x, chunk_y)
         except Exception as e:
             print(e)

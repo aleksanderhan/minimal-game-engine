@@ -197,16 +197,17 @@ class WorldTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, i, j, k)
+            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, j, i, k)
             c = 0
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
                     # Generate vertices for this face
-                    x, y, z = WorldTools.map_indices_to_coords(i, j, k, 0, 0, scale, voxel_world.shape[0])
+                    x, y, z = WorldTools.index_to_world(i, j, k, voxel_world.shape[0])
+
                     face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, scale)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type = voxel_world[i, j, k]
+                    voxel_type = voxel_world[j, i, k]
                     uvs = uv_maps[voxel_type][face_name]
 
                     u, v = uvs[c % 4]  # Cycle through the UV coordinates for each vertex
@@ -225,28 +226,44 @@ class WorldTools:
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
-    def map_indices_to_coords(i, j, k, chunk_x, chunk_y, scale, chunk_size):
-        print("i, j, k, chunk_x, chunk_y, scale, chunk_size", i, j, k, chunk_x, chunk_y, scale, chunk_size)
+    def world_to_index(x, y, z, n):
         """
-        Converts local chunk indices (i, j, k) to global coordinates (x, y, z).
-
+        Convert world coordinates (x, y, z) to array indices (i, j, k).
+        
         Parameters:
-            i, j, k: Local indices within a chunk.
-            chunk_x, chunk_y: The chunk's position in the world.
-            scale: The scale factor of the world, affecting the size of each voxel.
-            chunk_size: The size of each chunk in terms of number of voxels.
-
+        - x, y, z: World coordinates.
+        - n: Size of the voxel world in each dimension.
+        
         Returns:
-            x, y, z: Global coordinates corresponding to the local indices.
+        - i, j, k: Corresponding array indices.
         """
-        # Convert local indices back to global coordinates
-        # The formula takes the chunk's position in the world, multiplies by the chunk size and scale,
-        # and then adds the local position within the chunk multiplied by the scale.
-        x = (chunk_x * chunk_size + i) * scale * 2
-        y = (chunk_y * chunk_size + j) * scale * 2
-        z = k * scale * 2  # Assuming z starts at 0 and only positive values are considered
+        offset = (n - 1) // 2
+        i = x + offset
+        j = y + offset
+        k = z  # No change needed for z as it cannot be negative.
+        
+        return i, j, k
 
+    @staticmethod
+    def index_to_world(i, j, k, n):
+        """
+        Convert array indices (i, j, k) back to world coordinates (x, y, z).
+        
+        Parameters:
+        - i, j, k: Array indices.
+        - n: Size of the voxel world in each dimension.
+        
+        Returns:
+        - x, y, z: Corresponding world coordinates.
+        """
+        offset = (n - 1) // 2
+        x = i - offset
+        y = j - offset
+        z = k  # No change needed for z as it cannot be negative.
+        
         return x, y, z
+
+
 
     
     @staticmethod
@@ -283,7 +300,10 @@ class WorldTools:
             voxel_world = np.zeros((5, 5, 5), dtype=int)
             voxel_world[0, 0, 0] = 1    
             voxel_world[0, 0, 1] = 1
+            voxel_world[0, -1, 0] = 1
             voxel_world[-1, 0, 0] = 1
+            voxel_world[0, 1, 0] = 1
+            voxel_world[1, 0, 0] = 1
 
 
 
