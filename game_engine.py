@@ -66,19 +66,23 @@ class ObjectManager:
         geom_np = GameEngine.create_geometry(object.vertices, object.indices)
         geom_np.setTexture(self.game_engine.texture_atlas)
         geom_np.reparentTo(self.game_engine.render)
+        geom_np.setPos(0, 0, 0)
 
         if self.game_engine.args.debug:
             geom_np.setLightOff()
 
-        object.object_node = VoxelTools.create_dynamic_voxel_physics_node(object, self.game_engine.scale)
+        object_node = VoxelTools.create_dynamic_voxel_physics_node(object, self.game_engine.scale)
+        object.object_node = object_node
 
-        object.object_np = self.game_engine.render.attachNewNode(object.object_node)
-        object.object_np.setPythonTag("object", object)
-        object.object_np.setPos(position)
+        object_np = self.game_engine.render.attachNewNode(object_node)
+        object.object_np = object_np
 
-        geom_np.reparentTo(object.object_np)
+        object_np.setPythonTag("object", object)
+        object_np.setPos(position)
 
-        self.game_engine.physicsWorld.attachRigidBody(object.object_node)
+        geom_np.reparentTo(object_np)
+
+        self.game_engine.physicsWorld.attachRigidBody(object_node)
 
 
 class GameEngine(ShowBase):
@@ -128,7 +132,7 @@ class GameEngine(ShowBase):
 
     def setup_environment(self):
         #build_robot(self.physicsWorld)
-        pass        
+        pass
         
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
@@ -138,11 +142,22 @@ class GameEngine(ShowBase):
             hit_node = raycast_result.getNode()
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
+            
+            print("hit pos", hit_pos)
+            print("hit normal", hit_normal)
+            print("static", hit_node.static)
+            print(hit_node)
+            print()
 
+            
             if hit_node.name == "Terrain":
-                self.create_static_voxel(hit_pos)
+                self.create_static_voxel(hit_pos, hit_normal)
             elif hit_node.name == "Voxel":
+
                 face_center = self.get_face_center_from_hit(raycast_result)
+                print("---------------")
+                print("face_center", face_center)
+                
                 offset = self.scale / 2
                 if hit_node.static:
                     self.create_static_voxel(face_center + hit_normal * offset)
@@ -153,41 +168,55 @@ class GameEngine(ShowBase):
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
-            position = self.camera.getPos() + forward_vec * 10
+            position = self.camera.getPos() + forward_vec * 5
             self.create_dynamic_voxel(position)
 
     def create_dynamic_voxel(self, position: Vec3, voxel_type: int=1):
         print("creating dynamic voxel, position:", position)
-        object = DynamicArbitraryVoxelObject.make_single_voxel_object(position, self.scale, voxel_type, mass=1)
+        object = DynamicArbitraryVoxelObject.make_single_voxel_object(self.scale, voxel_type, mass=1)
         self.object_manager.register_object(object, position)
 
-    def create_static_voxel(self, position: Vec3, voxel_type: int=1):
-        print("creating static voxel, position:", position)
+    def create_static_voxel(self, position: Vec3, normal: Vec3, voxel_type: int=1):
+        print("---------------------------------------")
+        print("creating static voxel, position:", int(position.x), int(position.y), int(position.z))
+
+        print("normal", normal)
         #  position = Vec3(position.y, -position.x, position.z)
         # Calculate chunk positions based on global position
-        chunk_x = int(position.x / (self.chunk_size * self.scale))
-        chunk_y = int(position.y / (self.chunk_size * self.scale))
+        scaling_factor = self.chunk_size * self.scale
+        print("scaling_factor", scaling_factor)
 
-        # Calculate local voxel coordinates within the chunk
-        local_x = position.x % (self.chunk_size * self.scale)
-        local_y = position.y % (self.chunk_size * self.scale)
-        voxel_x = int(local_x / self.scale)
-        voxel_y = int(local_y / self.scale)
-        voxel_z = int(position.z / self.scale)
-
-        print("x:", voxel_x, "y:", voxel_y, "z:", voxel_z)
-
+        chunk_x = int(position.x / scaling_factor)
+        chunk_y = int(position.y / scaling_factor)
+        print("chunk", chunk_x, chunk_y)
 
         # Retrieve the voxel world for the specified chunk
         voxel_world = self.voxel_world_map.get((chunk_x, chunk_y))
 
-        # Check if the z-coordinate is within bounds
-        if 0 <= voxel_z < voxel_world.shape[2]:
+        # Calculate local voxel coordinates within the chunk
+
+        voxel_x = int(position.x + normal.x)
+        voxel_y = int(position.y + normal.y)
+        voxel_z = int(position.z + normal.z)
+
+        offset = int(self.chunk_size / 2 + 1)
+        print("offset", offset)
+        voxel_i = voxel_x if voxel_x >= 0 else voxel_x + offset
+        voxel_j = voxel_y if voxel_y >= 0 else voxel_y + offset
+        voxel_k = voxel_z
+        
+        print("voxel_x:", voxel_x, "voxel_y:", voxel_y, "voxel_z:", voxel_z)
+        print("voxel_i:", voxel_i, "voxel_j:", voxel_j, "voxel_k:", voxel_k)
+        print()
+
+        
+
+        try:
             # Set the voxel type at the calculated local coordinates
             voxel_world[voxel_x, voxel_y, voxel_z] = voxel_type
             self.chunk_manager.load_chunk(chunk_x, chunk_y)
-        else:
-            print(f"Voxel z-coordinate {voxel_z} is out of bounds.")
+        except Exception as e:
+            print(e)
 
     def get_face_center_from_hit(self, raycast_result):
         hit_normal = raycast_result.getHitNormal()
@@ -228,9 +257,11 @@ class GameEngine(ShowBase):
         return self.physicsWorld.rayTestClosest(start_point, end_point)      
 
     def apply_texture_and_physics_to_chunk(self, chunk_x, chunk_y, vertices, indices):
+        world_x, world_y = self.calculate_chunk_world_position(chunk_x, chunk_y)
         terrain_np = GameEngine.create_geometry(vertices, indices)
         terrain_np.setTexture(self.texture_atlas)
         terrain_np.reparentTo(self.render)
+        terrain_np.setPos(world_x, world_y, 0)
 
         if self.args.debug:
             terrain_np.setLightOff()
@@ -239,10 +270,7 @@ class GameEngine(ShowBase):
             self.visualize_normals(terrain_np, chunk_x, chunk_y)
 
         # Position the flat terrain chunk according to its world coordinates
-        world_x = chunk_x * self.chunk_size * self.scale
-        world_y = chunk_y * self.chunk_size * self.scale
         terrain_node = self.add_terrain_mesh_to_physics(vertices, indices, world_x, world_y)
-        terrain_np.setPos(world_x, world_y, 0)
 
         return terrain_np, terrain_node
 
@@ -267,15 +295,15 @@ class GameEngine(ShowBase):
         self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
 
         if self.args.debug:
-            debugNode = BulletDebugNode('Debug')
-            debugNP = self.render.attachNewNode(debugNode)
-            debugNP.show()
-            self.physicsWorld.setDebugNode(debugNP.node())
+            debug_node = BulletDebugNode('Debug')
+            debug_np = self.render.attachNewNode(debug_node)
+            debug_np.show()
+            self.physicsWorld.setDebugNode(debug_np.node())
 
     def toggle_gravity(self):
         self.physicsWorld.setGravity(next(self.acceleration_due_to_gravity))
     
-    def shoot_bullet(self, speed=100, scale=0.2, mass=0.1, color=(1, 1, 1, 1)):
+    def shoot_bullet(self, speed=100, scale=0.1, mass=0.1, color=(1, 1, 1, 1)):
         # Use the camera's position and orientation to shoot the bullet
         position = self.camera.getPos()
         direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
@@ -285,16 +313,16 @@ class GameEngine(ShowBase):
         self.create_bullet(position, velocity, scale, mass, color)
 
     def shoot_big_bullet(self):
-        return self.shoot_bullet(30, 0.5, 10, (1, 0, 0, 1))
+        return self.shoot_bullet(40, 1, 10, (1, 0, 0, 1))
 
-    def create_bullet(self, position, velocity, scale, mass, color):
+    def create_bullet(self, position, velocity: Vec3, radius, mass, color):
         # Bullet model
         bullet_model = self.loader.loadModel("models/misc/sphere.egg")  # Use a simple sphere model
         bullet_node = BulletRigidBodyNode('Bullet')
         
         # Bullet physics
-        bullet_model.setScale(scale)  # Scale down to bullet size
-        bullet_shape = BulletSphereShape(scale)  # The collision shape radius
+        bullet_model.setScale(radius)  # Scale down to bullet size
+        bullet_shape = BulletSphereShape(radius)  # The collision shape radius
         bullet_node.setMass(mass) 
         bullet_model.setColor(*color)
         
@@ -302,10 +330,13 @@ class GameEngine(ShowBase):
         bullet_node.setLinearVelocity(velocity)  # Set initial velocity
         
         bullet_np = self.render.attachNewNode(bullet_node)
-        bullet_np.setPos(position)
-        #bullet_np.node().setCcdMotionThreshold(1e-7)
-        #bullet_np.node().setCcdSweptSphereRadius(0.50)
         bullet_model.reparentTo(bullet_np)
+        bullet_np.setPos(position)
+        
+        speed = (velocity.x**2 + velocity.y**2 + velocity.z **2)**0.5 
+        if radius < 0.5 and speed > 50:
+            bullet_np.node().setCcdMotionThreshold(1e-7)
+            bullet_np.node().setCcdSweptSphereRadius(self.scale)
         
         self.physicsWorld.attachRigidBody(bullet_node)
         
@@ -371,7 +402,7 @@ class GameEngine(ShowBase):
         - scale: The scale factor used for the visualization length of normals.
         """
         # Assuming you have a method to calculate the chunk's world position:
-        chunk_world_x, chunk_world_y = self.calculate_chunk_world_position(chunk_x, chunk_y, scale)
+        chunk_world_x, chunk_world_y = self.calculate_chunk_world_position(chunk_x, chunk_y)
 
         lines_np = NodePath("normals_visualization")
         lines = LineSegs()
@@ -399,7 +430,7 @@ class GameEngine(ShowBase):
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
 
-    def calculate_chunk_world_position(self, chunk_x, chunk_y, scale):
+    def calculate_chunk_world_position(self, chunk_x, chunk_y):
         """
         Calculates the world position of the chunk based on its grid position.
 
@@ -411,8 +442,8 @@ class GameEngine(ShowBase):
         Tuple[float, float]: The world coordinates of the chunk.
         """
         # Adjust these calculations based on how you define chunk positions in world space
-        world_x = chunk_x * self.chunk_size * scale
-        world_y = chunk_y * self.chunk_size * scale
+        world_x = chunk_x * self.chunk_size * self.scale
+        world_y = chunk_y * self.chunk_size * self.scale
         return world_x, world_y
     
     def add_terrain_mesh_to_physics(self, vertices, indices, world_x, world_y):
@@ -431,14 +462,14 @@ class GameEngine(ShowBase):
             # Add the triangle to the mesh.
             terrainMesh.addTriangle(Vec3(*v0), Vec3(*v1), Vec3(*v2))
 
-        terrainShape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
-        terrainNode = BulletRigidBodyNode('Terrain')
-        terrainNode.addShape(terrainShape)
-        terrainNP = self.render.attachNewNode(terrainNode)
+        terrain_shape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
+        terrain_node = BulletRigidBodyNode('Terrain')
+        terrain_node.addShape(terrain_shape)
+        terrain_np = self.render.attachNewNode(terrain_node)
         # Set the position of the terrain's physics node to match its visual representation
-        terrainNP.setPos(world_x, world_y, 0)
-        self.physicsWorld.attachRigidBody(terrainNode)
-        return terrainNode
+        terrain_np.setPos(world_x, world_y, 0)
+        self.physicsWorld.attachRigidBody(terrain_node)
+        return terrain_node
 
     def setup_crosshair(self):
         # Path to the crosshair image
@@ -454,11 +485,12 @@ class GameEngine(ShowBase):
         self.physicsWorld.doPhysics(dt)
 
         # Example manual collision check
+        '''
         for node in self.physicsWorld.getRigidBodies():
             result = self.physicsWorld.contactTest(node)
             if result.getNumContacts() > 0:
                 print(f"Collision detected for {node.getName()}")
-        
+        '''
         return Task.cont
     
     def update_terrain(self, task):

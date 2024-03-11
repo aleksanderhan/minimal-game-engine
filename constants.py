@@ -34,14 +34,14 @@ normals = {
     'back':   (0,  -1,  0),
     'right':  ( 1,  0,  0),
     'left':   ( -1, 0,  0),
-    'up':   ( 0,  0, -1),
-    'down':     ( 0,  0,  1),
+    'up':   ( 0,  0, 1),
+    'down':     ( 0,  0,  -1),
 }
 
 color_normal_map = {
     (0, 1, 0): (1, 0, 0, 1), # red - front
-    (0, -1, 0): (1, 0, 1, 1), # magenta - back
-    (1, 0, 0): (0, 0, 1, 1), # blue - right
+    (0, -1, 0): (0, 0, 1, 1), # blue  - back
+    (1, 0, 0): (1, 0, 1, 1), # magenta - right
     (-1, 0, 0): (1, 1, 0, 1), # yellow -left
     (0, 0, 1): (0, 1, 0, 1), # green - up
     (0, 0, -1): (0, 1, 1, 1)  # cyan -down

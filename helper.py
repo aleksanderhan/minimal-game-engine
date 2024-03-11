@@ -21,57 +21,36 @@ def toggle(a, b, yield_a=True):
 
 class DynamicArbitraryVoxelObject:
 
-    def __init__(self, object_array, vertices, indices, mass, name="object"):
+    def __init__(self, object_array, vertices, indices, mass=1, friction=1, name="object"):
         self.object_array = object_array
         self.vertices = vertices
         self.indices = indices
         self.name = name
         self.mass = mass
+        self.friction = friction
         self.object_np = None
         self.object_node = None
 
     @staticmethod
-    def make_single_voxel_object(position: Vec3, scale: int, voxel_type: int=1, mass: int=1):
+    def make_single_voxel_object(scale: int, voxel_type: int, mass: int):
         object_array = np.zeros((1, 1, 1), dtype=int)
-        vertices, indices = VoxelTools.create_voxel_mesh(position, voxel_type, scale)
+        vertices, indices = VoxelTools.create_voxel_mesh(voxel_type, scale)
         return DynamicArbitraryVoxelObject(object_array, vertices, indices, mass)
     
 
 class VoxelTools:
 
     @staticmethod
-    def create_dynamic_voxel_physics_node(object: DynamicArbitraryVoxelObject, scale):
+    def create_dynamic_voxel_physics_node(object: DynamicArbitraryVoxelObject, scale: int):
         shape = BulletSphereShape(scale)
         node = BulletRigidBodyNode(object.name)
         node.setMass(object.mass)
+        node.setFriction(object.friction)
         node.addShape(shape)
         return node
     
     @staticmethod
-    def create_dynamic_voxel_physics_node_mesh(object: DynamicArbitraryVoxelObject):
-        mesh = BulletTriangleMesh()
-        
-        # Loop through the indices to get triangles. Since vertices now include texture coords,
-        # extract only the position data (first three components) for BulletPhysics.
-        for i in range(0, len(object.indices), 3):
-            idx0, idx1, idx2 = object.indices[i] * 8, object.indices[i+1] * 8, object.indices[i+2] * 8
-            
-            # Extract the position data from the flattened vertices array.
-            v0 = object.vertices[idx0:idx0+3]  # Extracts x, y, z for vertex 0
-            v1 = object.vertices[idx1:idx1+3]  # Extracts x, y, z for vertex 1
-            v2 = object.vertices[idx2:idx2+3]  # Extracts x, y, z for vertex 2
-            
-            # Add the triangle to the mesh.
-            mesh.addTriangle(Vec3(*v0), Vec3(*v1), Vec3(*v2))
-
-        shape = BulletTriangleMeshShape(mesh, dynamic=True)
-        node = BulletRigidBodyNode(object.name)
-        node.setMass(object.mass)
-        node.addShape(shape)
-        return node
-    
-    @staticmethod
-    def create_voxel_mesh(position, voxel_type, scale):
+    def create_voxel_mesh(voxel_type, scale):
         vertices = []
         indices = []
         index_counter = 0
@@ -79,7 +58,7 @@ class VoxelTools:
         j = 0
         for face_name, normal in normals.items():
             # Generate vertices for this face
-            face_vertices = VoxelTools.generate_face_vertices(*position, face_name, scale)
+            face_vertices = VoxelTools.generate_face_vertices(0, 0, 0, face_name, scale)
             face_normals = np.tile(np.array(normal), (4, 1))
 
             uvs = uv_maps[voxel_type][face_name]
@@ -275,9 +254,10 @@ class WorldTools:
             voxel_world[mask] = 1
 
 
-            #voxel_world = np.zeros((5, 5, 5), dtype=int)
-            #voxel_world[1, 0, 1] = 1    
-            #voxel_world[1, 1, 1] = 1
+            voxel_world = np.zeros((5, 5, 5), dtype=int)
+            voxel_world[0, 0, 0] = 1    
+            #voxel_world[0, 0, 1] = 1
+
 
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
 
