@@ -102,14 +102,14 @@ class VoxelTools:
 
     
     @staticmethod
-    def generate_face_vertices(x, y, z, face_name, voxel_size):
+    def generate_face_vertices(x, y, z, face_name, scale):
         """
         Generates vertices and normals for a given voxel face.
 
         Args:
             x, y, z: Coordinates of the voxel in the voxel grid.
             face_name: The face to be generated
-            voxel_size: Size of the voxel.
+            scale: Size of the voxel.
 
         Returns:
             face_vertices: A list of vertex positions for the face.
@@ -117,7 +117,7 @@ class VoxelTools:
         face_offsets = offset_arrays[face_name]
 
         # Calculate vertex positions vectorized
-        face_vertices = (np.array([x, y, z]) + face_offsets * voxel_size).astype(float)
+        face_vertices = (np.array([x, y, z]) + face_offsets * scale).astype(float)
 
         return face_vertices
     
@@ -196,19 +196,20 @@ class WorldTools:
 
         exposed_indices = np.argwhere(exposed_voxels)
         
-        for x, y, z in exposed_indices:
-            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, x, y, z)
-            j = 0
+        for i, j, k in exposed_indices:
+            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, i, j, k)
+            c = 0
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
                     # Generate vertices for this face
+                    x, y, z = WorldTools.map_indices_to_coords(i, j, k, 0, 0, scale, voxel_world.shape[0])
                     face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, scale)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type = voxel_world[x, y, z]
+                    voxel_type = voxel_world[i, j, k]
                     uvs = uv_maps[voxel_type][face_name]
 
-                    u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
+                    u, v = uvs[c % 4]  # Cycle through the UV coordinates for each vertex
 
                     # Append generated vertices, normals, and texture coordinates to the list
                     for fv, fn in zip(face_vertices, face_normals):
@@ -219,9 +220,34 @@ class WorldTools:
                         index_counter + 2, index_counter + 3, index_counter])
                     
                     index_counter += 4
-                    j += 1
+                    c += 1
         
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
+    
+    @staticmethod
+    def map_indices_to_coords(i, j, k, chunk_x, chunk_y, scale, chunk_size):
+        print("i, j, k, chunk_x, chunk_y, scale, chunk_size", i, j, k, chunk_x, chunk_y, scale, chunk_size)
+        """
+        Converts local chunk indices (i, j, k) to global coordinates (x, y, z).
+
+        Parameters:
+            i, j, k: Local indices within a chunk.
+            chunk_x, chunk_y: The chunk's position in the world.
+            scale: The scale factor of the world, affecting the size of each voxel.
+            chunk_size: The size of each chunk in terms of number of voxels.
+
+        Returns:
+            x, y, z: Global coordinates corresponding to the local indices.
+        """
+        # Convert local indices back to global coordinates
+        # The formula takes the chunk's position in the world, multiplies by the chunk size and scale,
+        # and then adds the local position within the chunk multiplied by the scale.
+        x = (chunk_x * chunk_size + i) * scale * 2
+        y = (chunk_y * chunk_size + j) * scale * 2
+        z = k * scale * 2  # Assuming z starts at 0 and only positive values are considered
+
+        return x, y, z
+
     
     @staticmethod
     def get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y):
@@ -256,7 +282,9 @@ class WorldTools:
 
             voxel_world = np.zeros((5, 5, 5), dtype=int)
             voxel_world[0, 0, 0] = 1    
-            #voxel_world[0, 0, 1] = 1
+            voxel_world[0, 0, 1] = 1
+            voxel_world[-1, 0, 0] = 1
+
 
 
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
