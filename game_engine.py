@@ -44,6 +44,7 @@ from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePa
 from chunk_manager import ChunkManager
 from helper import toggle, VoxelTools, WorldTools, DynamicArbitraryVoxelObject
 from constants import color_normal_map
+from world import VoxelWorld
 
 
 random.seed()
@@ -198,15 +199,13 @@ class GameEngine(ShowBase):
         voxel_x = int(position.x + normal.x)
         voxel_y = int(position.y + normal.y)
         voxel_z = int(position.z + normal.z)
-        
-        print("voxel_x:", voxel_x, "voxel_y:", voxel_y, "voxel_z:", voxel_z)
+        print("voxel_x, voxel_y, voxel_z", voxel_x, voxel_y, voxel_z)
         print()
 
-        x, y, z = WorldTools.map_coords_to_indices(voxel_x, voxel_y, voxel_z, self.scale, self.chunk_size)
 
         try:
             # Set the voxel type at the calculated local coordinates
-            voxel_world[x, y, z] = voxel_type
+            voxel_world.set_voxel(voxel_x, voxel_y, voxel_z, voxel_type)
             self.chunk_manager.load_chunk(chunk_x, chunk_y)
         except Exception as e:
             print(e)

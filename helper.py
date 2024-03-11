@@ -10,6 +10,7 @@ from panda3d.core import (
 )
 
 from constants import offset_arrays, normals, uv_maps
+from world import VoxelWorld
 
 
 # Toggle generator. Returns a or b alternatingly on next()
@@ -79,27 +80,18 @@ class VoxelTools:
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
 
     @staticmethod
-    def check_surrounding_air(voxel_world, x, y, z):
-        """
-        Check each of the six directions around a point (x, y, z) in the voxel world
-        for air (assumed to be represented by 0), including the boundary air of the world.
-        """
-        # Define the world's size
-        max_x, max_y, max_z = voxel_world.shape[0] - 1, voxel_world.shape[1] - 1, voxel_world.shape[2] - 1
-
-        # Initialize a list to store the names of faces exposed to air, including boundaries
+    def check_surrounding_air(voxel_world: VoxelWorld, i, j, k):
+        max_i, max_j, max_k = voxel_world.shape()[0] - 1, voxel_world.shape()[1] - 1, voxel_world.shape()[2] - 1
         exposed_faces = []
-
-        # Check each direction, directly considering the boundaries of the world
-        if x == max_x or voxel_world[min(x + 1, max_x), y, z] == 0: exposed_faces.append("right")
-        if x == 0 or voxel_world[max(x - 1, 0), y, z] == 0: exposed_faces.append("left")
-        if y == max_y or voxel_world[x, min(y + 1, max_y), z] == 0: exposed_faces.append("front")
-        if y == 0 or voxel_world[x, max(y - 1, 0), z] == 0: exposed_faces.append("back")
-        if z == max_z or voxel_world[x, y, min(z + 1, max_z)] == 0: exposed_faces.append("up")
-        if z == 0 or voxel_world[x, y, max(z - 1, 0)] == 0: exposed_faces.append("down")
-
+        
+        if i == max_i or voxel_world.world_array[i + 1, j, k] == 0: exposed_faces.append("right")
+        if i == 0 or voxel_world.world_array[i - 1, j, k] == 0: exposed_faces.append("left")
+        if j == max_j or voxel_world.world_array[i, j + 1, k] == 0: exposed_faces.append("front")
+        if j == 0 or voxel_world.world_array[i, j - 1, k] == 0: exposed_faces.append("back")
+        if k == max_k or voxel_world.world_array[i, j, k + 1] == 0: exposed_faces.append("up")
+        if k == 0 or voxel_world.world_array[i, j, k - 1] == 0: exposed_faces.append("down")
+        
         return exposed_faces
-
     
     @staticmethod
     def generate_face_vertices(x, y, z, face_name, scale):
@@ -121,7 +113,6 @@ class VoxelTools:
 
         return face_vertices
     
-
     @staticmethod
     def noop_transform(face):
         return face
@@ -143,23 +134,23 @@ class VoxelTools:
 
     
     @staticmethod
-    def identify_exposed_voxels(voxel_world):
+    def identify_exposed_voxels(world_array):
         """
         Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
         True means it is exposed to air, False means it's not.
 
         Parameters:
-            - voxel_world: a 3D numpy array representing the voxel types as integers in the world
+            - world_array: a 3D numpy array representing the voxel types as integers in the world
         """
         # Pad the voxel world with zeros (air) on all sides
-        padded_world = np.pad(voxel_world, pad_width=1, mode='constant', constant_values=0)
+        padded_world = np.pad(world_array, pad_width=1, mode='constant', constant_values=0)
         
-        exposed_faces = np.zeros_like(voxel_world, dtype=bool)
+        exposed_faces = np.zeros_like(world_array, dtype=bool)
         
         for direction, (dx, dy, dz) in normals.items():
             shifted_world = np.roll(padded_world, shift=(dx, dy, dz), axis=(0, 1, 2))
             # Expose face if there's air next to it (voxel value of 0 in the shifted world)
-            exposed_faces |= ((shifted_world[1:-1, 1:-1, 1:-1] == 0) & (voxel_world > 0))
+            exposed_faces |= ((shifted_world[1:-1, 1:-1, 1:-1] == 0) & (world_array > 0))
         
         return exposed_faces
     
@@ -176,7 +167,7 @@ class WorldTools:
         return vertices, indices, voxel_world, t1-t0, t2-t1
     
     @staticmethod
-    def create_world_mesh(voxel_world, scale):
+    def create_world_mesh(voxel_world: VoxelWorld, scale):
         """Efficiently creates mesh data for exposed voxel faces.
 
         Args:
@@ -188,7 +179,7 @@ class WorldTools:
                 indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
         """
 
-        exposed_voxels = VoxelTools.identify_exposed_voxels(voxel_world)
+        exposed_voxels = VoxelTools.identify_exposed_voxels(voxel_world.get_world_array())
 
         vertices = []
         indices = []
@@ -197,19 +188,19 @@ class WorldTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, j, i, k)
+            x, y, z = VoxelWorld.index_to_world(i, j, k, voxel_world.shape()[0])
+            exposed_faces = VoxelTools.check_surrounding_air(voxel_world, i, j, k)
+
             c = 0
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
                     # Generate vertices for this face
-                    x, y, z = WorldTools.index_to_world(i, j, k, voxel_world.shape[0])
 
                     face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, scale)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type = voxel_world[j, i, k]
+                    voxel_type = voxel_world.get_voxel(x, y, z)
                     uvs = uv_maps[voxel_type][face_name]
-
                     u, v = uvs[c % 4]  # Cycle through the UV coordinates for each vertex
 
                     # Append generated vertices, normals, and texture coordinates to the list
@@ -222,49 +213,8 @@ class WorldTools:
                     
                     index_counter += 4
                     c += 1
-        
+
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
-    
-    @staticmethod
-    def world_to_index(x, y, z, n):
-        """
-        Convert world coordinates (x, y, z) to array indices (i, j, k).
-        
-        Parameters:
-        - x, y, z: World coordinates.
-        - n: Size of the voxel world in each dimension.
-        
-        Returns:
-        - i, j, k: Corresponding array indices.
-        """
-        offset = (n - 1) // 2
-        i = x + offset
-        j = y + offset
-        k = z  # No change needed for z as it cannot be negative.
-        
-        return i, j, k
-
-    @staticmethod
-    def index_to_world(i, j, k, n):
-        """
-        Convert array indices (i, j, k) back to world coordinates (x, y, z).
-        
-        Parameters:
-        - i, j, k: Array indices.
-        - n: Size of the voxel world in each dimension.
-        
-        Returns:
-        - x, y, z: Corresponding world coordinates.
-        """
-        offset = (n - 1) // 2
-        x = i - offset
-        y = j - offset
-        z = k  # No change needed for z as it cannot be negative.
-        
-        return x, y, z
-
-
-
     
     @staticmethod
     def get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y):
@@ -273,7 +223,7 @@ class WorldTools:
             depth = chunk_size
             
             # Initialize an empty voxel world with air (0)
-            voxel_world = np.zeros((width, depth, max_height), dtype=int)
+            world_array = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
             #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=3)
@@ -284,9 +234,6 @@ class WorldTools:
             height_levels = np.clip(height_levels, 1, max_height)
             adjusted_height_levels = height_levels[:-1, :-1]
 
-            # Initialize the voxel world as zeros
-            voxel_world = np.zeros((width, depth, max_height), dtype=int)
-
             # Create a 3D array representing each voxel's vertical index (Z-coordinate)
             z_indices = np.arange(max_height).reshape(1, 1, max_height)
 
@@ -294,21 +241,59 @@ class WorldTools:
             mask = z_indices < adjusted_height_levels[:,:,np.newaxis]
 
             # Apply the mask to the voxel world
-            voxel_world[mask] = 1
+            world_array[mask] = 1
 
 
-            voxel_world = np.zeros((5, 5, 5), dtype=int)
-            voxel_world[0, 0, 0] = 1    
-            voxel_world[0, 0, 1] = 1
-            voxel_world[0, -1, 0] = 1
-            voxel_world[-1, 0, 0] = 1
-            voxel_world[0, 1, 0] = 1
-            voxel_world[1, 0, 0] = 1
+
+            '''
+            world_array = np.array([[[0, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [0, 0, 0, 0, 0]],
+
+                            [[0, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [0, 0, 0, 0, 0]],
+
+                            [[0, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [0, 0, 0, 0, 0]],
+
+                            [[0, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [0, 0, 0, 0, 0]],
+
+                            [[0, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [1, 0, 0, 0, 0],
+                             [0, 0, 0, 0, 0]]])
+            '''
+            #world_array = np.zeros((5, 5, 5), dtype=int)
+            voxel_world = VoxelWorld(world_array)
+
+            #voxel_world.set_voxel(0, 0, 0, 1)
+            #voxel_world.set_voxel(0, 0, 1, 1)
+            #voxel_world.set_voxel(1, 0, 0, 1)
+            #voxel_world.set_voxel(-1, 0, 0, 1)
+            #voxel_world.set_voxel(0, 1, 0, 1)
+            #voxel_world.set_voxel(0, -1, 0, 1)
+
+            #voxel_world.set_voxel(1, -1, 0, 1)
+            #voxel_world.set_voxel(-1, -1, 0, 1)
+            #voxel_world.set_voxel(1, 1, 0, 1)
+            #voxel_world.set_voxel(-1, 1, 0, 1)
 
 
 
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
-
             return voxel_world
 
         return voxel_world_map.get((chunk_x, chunk_y)) 
@@ -342,7 +327,7 @@ class WorldTools:
                                     base=1)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 30
+                height_map[x, y] = height * 20
 
         return height_map
     
