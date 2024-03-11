@@ -12,7 +12,7 @@ class ChunkManager:
         self.pool = Pool(processes=6)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
         self.inner_radius = 8
-        self.chunk_radius = 12
+        self.chunk_radius = 0#12
         self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_player_chunk_pos(self):

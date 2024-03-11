@@ -35,7 +35,7 @@ class DynamicArbitraryVoxelObject:
     @staticmethod
     def make_single_voxel_object(scale: int, voxel_type: int, mass: int):
         object_array = np.zeros((1, 1, 1), dtype=int)
-        vertices, indices = VoxelTools.create_voxel_mesh(voxel_type, scale)
+        vertices, indices = VoxelTools.create_single_voxel_mesh(voxel_type, scale)
         return DynamicArbitraryVoxelObject(object_array, vertices, indices, mass)
     
 
@@ -51,7 +51,7 @@ class VoxelTools:
         return node
     
     @staticmethod
-    def create_voxel_mesh(voxel_type, scale):
+    def create_single_voxel_mesh(voxel_type, scale):
         vertices = []
         indices = []
         index_counter = 0
@@ -158,6 +158,21 @@ class VoxelTools:
 class WorldTools:
 
     @staticmethod
+    def calculate_voxel_position_from(hit_pos: Vec3, scale: float, chunk_size: int) -> Vec3:
+        world_center = Vec3(chunk_size * scale / 2, chunk_size * scale / 2, chunk_size * scale / 2)
+        # Adjusting hit position to be relative to the world's center
+        adjusted_hit_pos = hit_pos + world_center
+
+        # Convert hit position to voxel grid indices accurately
+        indices = adjusted_hit_pos / scale
+        indices = Vec3(int(indices.x), int(indices.y), int(indices.z))
+
+        # Recalculate the exact center position of the voxel
+        voxel_center = (indices + Vec3(0.5, 0.5, 0.5)) * scale - world_center
+
+        return voxel_center
+    
+    @staticmethod
     def generate_chunk(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, scale):
         t0 = time.perf_counter()
         voxel_world = WorldTools.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
@@ -226,8 +241,8 @@ class WorldTools:
             world_array = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=3)
-            heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
+            heightmap = WorldTools.generate_flat_height_map(chunk_size, height=3)
+            #heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
             
             # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
             height_levels = np.floor(heightmap).astype(int)
@@ -276,10 +291,10 @@ class WorldTools:
                              [1, 0, 0, 0, 0],
                              [0, 0, 0, 0, 0]]])
             '''
-            #world_array = np.zeros((5, 5, 5), dtype=int)
+            world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array)
 
-            #voxel_world.set_voxel(0, 0, 0, 1)
+            voxel_world.set_voxel(0, 0, 0, 1)
             #voxel_world.set_voxel(0, 0, 1, 1)
             #voxel_world.set_voxel(1, 0, 0, 1)
             #voxel_world.set_voxel(-1, 0, 0, 1)

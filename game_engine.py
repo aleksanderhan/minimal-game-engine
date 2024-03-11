@@ -40,6 +40,8 @@ from PIL import Image
 import time
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
+from panda3d.core import TransparencyAttrib, Material, VBase4
+
 
 from chunk_manager import ChunkManager
 from helper import toggle, VoxelTools, WorldTools, DynamicArbitraryVoxelObject
@@ -108,6 +110,10 @@ class GameEngine(ShowBase):
             "grass": "assets/grass.png"
         }
 
+        self.build_mode = False
+        self.placeholder_cube = None
+        self.spawn_distance = 10
+
         self.camera.setPos(0, 0, 5)
         self.camera.lookAt(0, 0, 0)
 
@@ -126,14 +132,64 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_terrain, "UpdateTerrain")
 
         self.accept('mouse1', self.shoot_bullet)  # Listen for left mouse click
-        self.accept('mouse3', self.shoot_big_bullet)
+        self.accept('mouse3', self.shoot_big_bullet) # Listen for right mouse click
         self.accept('f', self.create_and_place_voxel)
         self.accept('r', self.manual_raycast_test)
         self.accept('g', self.toggle_gravity)
+        self.accept('b', self.toggle_build_mode)
+
 
     def setup_environment(self):
         #build_robot(self.physicsWorld)
         pass
+
+    def toggle_build_mode(self):
+        self.build_mode = not self.build_mode
+
+        if self.build_mode == True:
+            raycast_result = self.cast_ray_from_camera(self.spawn_distance)
+
+            if raycast_result.hasHit():
+                position = self.get_center_of_hit_voxel(raycast_result)
+                self.placeholder_cube = self.create_translucent_cube(position, self.scale)
+                self.taskMgr.add(self.update_placeholder_cube, "UpdatePlaceholderCube")
+        else:
+            if self.placeholder_cube is not None:
+                self.taskMgr.remove("UpdatePlaceholderCube")
+                self.placeholder_cube.removeNode()
+                self.placeholder_cube = None
+
+    def update_placeholder_cube(self, task):
+        if self.placeholder_cube is not None:
+            hit_node = self.cast_ray_from_camera(self.spawn_distance)
+            position = self.get_center_of_hit_voxel(hit_node)
+            self.placeholder_cube.setPos(int(position.x), int(position.y), int(position.z))
+        return Task.cont
+
+    def create_translucent_cube(self, position, scale):
+        vertices, indices = VoxelTools.create_single_voxel_mesh(0, scale)
+        cube = GameEngine.create_geometry(vertices, indices)
+        
+        # Set the cube's scale and position
+        cube.setScale(2*scale)
+        cube.setPos(position)
+        
+        # Make the cube translucent
+        cube.setTransparency(TransparencyAttrib.M_alpha)
+        cube.setAlphaScale(0.5)  # Adjust this value as needed for desired transparency
+        
+        # Optional: Apply a material to the cube if you want a specific color
+        mat = Material()
+        mat.setDiffuse(VBase4(0.5, 0.5, 0.8, 0.5))  # RGBA, last value is the alpha
+        cube.setMaterial(mat, 1)
+
+        # Reparent the cube to render it in the scene
+        cube.reparentTo(self.render)
+        return cube
+    
+    def get_center_of_hit_voxel(self, hit_node):
+        hit_voxel_pos = WorldTools.calculate_voxel_position_from(hit_node.getHitPos(), self.scale, self.chunk_size)
+        return hit_voxel_pos + hit_node.getHitNormal() * self.scale
         
     def create_and_place_voxel(self):
         raycast_result = self.cast_ray_from_camera()
@@ -144,6 +200,7 @@ class GameEngine(ShowBase):
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
             
+            print("---------------------------------------")
             print("hit pos", hit_pos)
             print("hit normal", hit_normal)
             print("static", hit_node.static)
@@ -152,7 +209,8 @@ class GameEngine(ShowBase):
 
             
             if hit_node.name == "Terrain":
-                self.create_static_voxel(hit_pos, hit_normal)
+                create_position = self.get_center_of_hit_voxel(raycast_result)
+                self.create_static_voxel(create_position)
             elif hit_node.name == "Voxel":
 
                 face_center = self.get_face_center_from_hit(raycast_result)
@@ -169,7 +227,7 @@ class GameEngine(ShowBase):
             # place voxel in mid air
             # Calculate the exact position 10 meter in front of the camera
             forward_vec = self.camera.getQuat().getForward()
-            position = self.camera.getPos() + forward_vec * 5
+            position = self.camera.getPos() + forward_vec * self.spawn_distance
             self.create_dynamic_voxel(position)
 
     def create_dynamic_voxel(self, position: Vec3, voxel_type: int=1):
@@ -177,36 +235,25 @@ class GameEngine(ShowBase):
         object = DynamicArbitraryVoxelObject.make_single_voxel_object(self.scale, voxel_type, mass=1)
         self.object_manager.register_object(object, position)
 
-    def create_static_voxel(self, position: Vec3, normal: Vec3, voxel_type: int=1):
-        print("---------------------------------------")
-        print("creating static voxel, position:", int(position.x), int(position.y), int(position.z))
+    def create_static_voxel(self, position: Vec3, voxel_type: int=1):
+        x = int(position.x)
+        y = int(position.y)
+        z = int(position.z)
+        print("adjusted position", position)
+        print("creating static voxel, position:", x, y, z)
 
-        print("normal", normal)
-        #  position = Vec3(position.y, -position.x, position.z)
-        # Calculate chunk positions based on global position
         scaling_factor = self.chunk_size * self.scale
-        print("scaling_factor", scaling_factor)
 
         chunk_x = int(position.x / scaling_factor)
         chunk_y = int(position.y / scaling_factor)
-        print("chunk", chunk_x, chunk_y)
 
-        # Retrieve the voxel world for the specified chunk
         voxel_world = self.voxel_world_map.get((chunk_x, chunk_y))
-
-        # Calculate local voxel coordinates within the chunk
-
-        voxel_x = int(position.x + normal.x)
-        voxel_y = int(position.y + normal.y)
-        voxel_z = int(position.z + normal.z)
-        print("voxel_x, voxel_y, voxel_z", voxel_x, voxel_y, voxel_z)
-        print()
-
 
         try:
             # Set the voxel type at the calculated local coordinates
-            voxel_world.set_voxel(voxel_x, voxel_y, voxel_z, voxel_type)
+            voxel_world.set_voxel(x, y, z, voxel_type)
             self.chunk_manager.load_chunk(chunk_x, chunk_y)
+            pass
         except Exception as e:
             print(e)
 

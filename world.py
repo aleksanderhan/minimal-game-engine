@@ -13,7 +13,6 @@ class VoxelWorld:
 
         return self.world_array[ix, iy, iz]
 
-
     def set_voxel(self, x, y, z, value):
         ix, iy, iz = x + self.offset[0], y + self.offset[1], z + self.offset[2] - 1        
         self.world_array[ix, iy, iz] = value
