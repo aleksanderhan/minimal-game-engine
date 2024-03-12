@@ -1,4 +1,5 @@
 import numpy as np
+from constants import VoxelType, voxel_type_map
 
 class VoxelWorld:
 
@@ -6,16 +7,16 @@ class VoxelWorld:
         self.world_array = world_array
         self.offset = (np.array(world_array.shape) - 1) // 2
         
-    def get_voxel(self, x, y, z):
+    def get_voxel_type(self, x, y, z) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
         # and offset is half the size of the current array dimensions.
         ix, iy, iz = x + self.offset[0], y + self.offset[1], z + self.offset[2] - 1
+        voxel_type_int = self.world_array[ix, iy, iz]
+        return voxel_type_map[voxel_type_int]
 
-        return self.world_array[ix, iy, iz]
-
-    def set_voxel(self, x, y, z, value):
+    def set_voxel(self, x, y, z, voxel_type: VoxelType):
         ix, iy, iz = x + self.offset[0], y + self.offset[1], z + self.offset[2] - 1        
-        self.world_array[ix, iy, iz] = value
+        self.world_array[ix, iy, iz] = voxel_type.value
 
     def get_world_array(self):
         return self.world_array

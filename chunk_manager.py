@@ -138,4 +138,4 @@ class ChunkManager:
         if chunk_data:
             terrainNP, terrainNode, _ = chunk_data
             terrainNP.removeNode()
-            self.game_engine.physicsWorld.removeRigidBody(terrainNode)
+            self.game_engine.physics_world.removeRigidBody(terrainNode)

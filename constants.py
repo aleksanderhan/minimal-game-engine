@@ -1,4 +1,16 @@
 import numpy as np
+from enum import Enum
+
+class VoxelType(Enum):
+    AIR = 0
+    STONE = 1
+    GRASS = 2
+
+voxel_type_map = {
+    0: VoxelType.AIR,
+    1: VoxelType.STONE,
+    2: VoxelType.GRASS,
+}
 
 offset_arrays = {
     "front": np.array([(-1, 1, -1), (-1, 1, 1), (1, 1, 1), (1, 1, -1)]),
@@ -11,7 +23,15 @@ offset_arrays = {
 
 
 uv_maps = {
-    0: {
+    VoxelType.AIR: {
+        "front": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
+        "back": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
+        "right": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
+        "left": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
+        "up": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
+        "down": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
+    },
+    VoxelType.STONE: {
         "front": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
         "back": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
         "right": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
@@ -19,7 +39,7 @@ uv_maps = {
         "up": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
         "down": [(0, 0), (0.5, 0), (0.5, 0.5), (0, 0.5)],
     }, 
-    1: {
+    VoxelType.GRASS: {
         "front": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
         "back": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
         "right": [(0.5, 0), (1, 0), (1, 0.5), (0.5, 0.5)],
@@ -45,5 +65,24 @@ color_normal_map = {
     (1, 0, 0): (1, 0, 1, 1), # magenta - right
     (-1, 0, 0): (1, 1, 0, 1), # yellow -left
     (0, 0, 1): (0, 1, 0, 1), # green - up
-    (0, 0, -1): (0, 1, 1, 1)  # cyan -down
+    (0, 0, -1): (0, 1, 1, 1),  # cyan -down
+}
+
+
+material_properties = {
+    VoxelType.AIR: { # Air
+        "mass": 0,
+        "friction": 0,
+        "coupling_strength": 0
+    },
+    VoxelType.STONE: { # Stone
+        "mass": 10,
+        "friction": 100,
+        "coupling_strength": 1 
+    },
+    VoxelType.GRASS: { # grass
+        "mass": 2,
+        "friction": 2,
+        "coupling_strength": 0.5
+    },
 }
