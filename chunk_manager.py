@@ -14,7 +14,7 @@ class ChunkManager:
         self.pool = Pool(processes=6)
         self.previously_updated_position = None  # Initialize with None or with the player's starting position
         self.inner_radius = 8
-        self.chunk_radius = 0#12
+        self.chunk_radius = 4#12
         self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
     def get_voxel_world(self, chunk_x: int, chunk_y: int) -> VoxelWorld:
@@ -22,7 +22,7 @@ class ChunkManager:
 
     def get_player_chunk_pos(self):
         player_pos = self.game_engine.camera.getPos()
-        chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(player_pos, self.game_engine.voxel_size, self.game_engine.chunk_size)
+        chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(player_pos, self.game_engine.chunk_size, self.game_engine.voxel_size)
         return chunk_x, chunk_y
 
     def update_chunks(self):
@@ -93,6 +93,7 @@ class ChunkManager:
                         chunks_to_load.append((x, y))
 
         # Return the list of chunks that need to be loaded.
+        print("chunks_to_load", chunks_to_load)
         return chunks_to_load
 
     def unload_chunks_furthest_away(self, player_chunk_x, player_chunk_y, chunk_radius):

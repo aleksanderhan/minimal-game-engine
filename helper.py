@@ -452,7 +452,10 @@ class WorldTools:
             world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array, voxel_size)
 
-            #voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
+            if chunk_x == 0 and chunk_y == 0:
+                voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
+            
+            
             voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
             voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
             voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
@@ -518,7 +521,7 @@ class WorldTools:
 
         Parameters:
         - chunk_x, chunk_y: The chunk's position in the grid/map.
-        - chunk_size: The chunk is comprised out of chunk_size x chunk_size amount of voxels
+        - chunk_size: Number of voxels along a single axis of the chunk.
         - voxel_size: Size of a voxel
 
         Returns:
@@ -530,7 +533,7 @@ class WorldTools:
         return x, y
     
     @staticmethod
-    def calculate_world_chunk_position(position: Vec3, voxel_size: float, chunk_size: int):
+    def calculate_world_chunk_position(position: Vec3, chunk_size: int, voxel_size: float):
         """
         Calculates the chunk grid coordinates corresponding to a world position.
 
@@ -539,11 +542,18 @@ class WorldTools:
         - voxel_size: Size of a voxel.
         - chunk_size: Number of voxels along a single axis of the chunk.
 
-        Returns:
+        Returns:    
         Tuple[int, int]: The chunk's grid coordinates (chunk_x, chunk_y).
         """
-        # Calculate chunk coordinates 
-        chunk_x = int(position.x / (chunk_size * voxel_size))
-        chunk_y = int(position.y / (chunk_size * voxel_size))
+        # Calculate the half-size of a chunk in world units
+        half_chunk_size_world_units = (chunk_size * voxel_size) / 2
+
+        # Adjust position to align chunk centers with the origin
+        adjusted_pos_x = position.x + half_chunk_size_world_units
+        adjusted_pos_y = position.y + half_chunk_size_world_units
+
+        # Calculate chunk coordinates
+        chunk_x = math.floor(adjusted_pos_x / (chunk_size * voxel_size)) if adjusted_pos_x >= 0 else math.ceil(adjusted_pos_x / (chunk_size * voxel_size)) - 1
+        chunk_y = math.floor(adjusted_pos_y / (chunk_size * voxel_size)) if adjusted_pos_y >= 0 else math.ceil(adjusted_pos_y / (chunk_size * voxel_size)) - 1
 
         return chunk_x, chunk_y

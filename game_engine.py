@@ -100,11 +100,11 @@ class GameEngine(ShowBase):
 
         #self.render.setTwoSided(True)
         
-        self.voxel_size = 0.5
+        self.voxel_size = 1
         self.ground_height = 0
         self.max_height = 50
 
-        n = 2
+        n = 3
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -118,7 +118,7 @@ class GameEngine(ShowBase):
         self.placeholder_cube = None
         self.spawn_distance = 10
 
-        self.camera.setPos(-5, 0, 4)
+        self.camera.setPos(0, 0, 5)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
@@ -165,6 +165,7 @@ class GameEngine(ShowBase):
                 position = voxcel_center_pos + hit_normal * self.voxel_size
             else:
                 position = self.get_spawn_position()
+                
             self.placeholder_cube = self.create_translucent_cube(position)
             self.taskMgr.add(self.update_placeholder_cube, "UpdatePlaceholderCube")
         else:
@@ -261,7 +262,7 @@ class GameEngine(ShowBase):
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType=VoxelType.STONE):
         print("creating static voxel, position:", position)
 
-        chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(position, self.voxel_size, self.chunk_size)
+        chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(position, self.chunk_size, self.voxel_size)
         voxel_world = self.chunk_manager.get_voxel_world(chunk_x, chunk_y)
 
         center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
@@ -293,7 +294,7 @@ class GameEngine(ShowBase):
             #print("ijk", ijk, "position", position)
             position = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
             print("get_center_of_hit_static_voxel", position)
-            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(position, self.voxel_size, self.chunk_size)
+            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(position, self.chunk_size, self.voxel_size)
             print("chunk_x, chunk_y", chunk_x, chunk_y)
             center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
             print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
@@ -381,10 +382,10 @@ class GameEngine(ShowBase):
         bullet_model.reparentTo(bullet_np)
         bullet_np.setPos(position)
         
-        speed = (velocity.x**2 + velocity.y**2 + velocity.z **2)**0.5 
-        if radius < 0.5 and speed > 50:
-            bullet_np.node().setCcdMotionThreshold(1e-7)
-            bullet_np.node().setCcdSweptSphereRadius(2*radius)
+        #speed = (velocity.x**2 + velocity.y**2 + velocity.z **2)**0.5 
+        #if radius <= 0.5 and speed >= 50:
+        bullet_np.node().setCcdMotionThreshold(1e-7)
+        bullet_np.node().setCcdSweptSphereRadius(radius)
         
         self.physics_world.attachRigidBody(bullet_node)
         
@@ -450,6 +451,7 @@ class GameEngine(ShowBase):
         - scale: The scale factor used for the visualization length of normals.
         """
         chunk_world_x, chunk_world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
+        print("chunk_world_x, chunk_world_y", chunk_world_x, chunk_world_y)
 
         lines_np = NodePath("normals_visualization")
         lines = LineSegs()
@@ -465,6 +467,9 @@ class GameEngine(ShowBase):
             local_v = vertex_reader.getData3f()
             n = normal_reader.getData3f()
 
+            #center_x = world_x - self.chunk_size * self.voxel_size / 2
+            #center_y = world_y - self.chunk_size * self.voxel_size / 2
+
             # Adjust local vertex position by chunk's world position
             global_v = Vec3(local_v.getX() + chunk_world_x, local_v.getY() + chunk_world_y, local_v.getZ())
 
@@ -478,11 +483,13 @@ class GameEngine(ShowBase):
         lines_np.reparentTo(self.render)
 
     def apply_texture_and_physics_to_chunk(self, chunk_x, chunk_y, vertices, indices):
-        world_x, world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
         terrain_np = GameEngine.create_geometry(vertices, indices)
         terrain_np.setTexture(self.texture_atlas)
         terrain_np.reparentTo(self.render)
-        terrain_np.setPos(world_x, world_y, 0)
+
+        world_x, world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
+        world_z = self.ground_height + self.voxel_size / 2
+        terrain_np.setPos(world_x, world_y, world_z)
 
         if self.args.debug:
             terrain_np.setLightOff()
@@ -515,8 +522,11 @@ class GameEngine(ShowBase):
         terrain_node = BulletRigidBodyNode('Terrain')
         terrain_node.addShape(terrain_shape)
         terrain_np = self.render.attachNewNode(terrain_node)
+
         # Set the position of the terrain's physics node to match its visual representation
-        terrain_np.setPos(world_x, world_y, 0)
+        world_z = self.ground_height + self.voxel_size / 2
+        terrain_np.setPos(world_x, world_y, world_z)
+
         self.physics_world.attachRigidBody(terrain_node)
         return terrain_node
 
