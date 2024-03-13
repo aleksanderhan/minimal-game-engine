@@ -5,24 +5,17 @@ class VoxelWorld:
 
     def __init__(self, world_array):
         self.world_array = world_array
-        self.offset = (np.array(world_array.shape) - 1) // 2
         
     def get_voxel_type(self, x, y, z) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
         # and offset is half the size of the current array dimensions.
-        ix, iy, iz = x + self.offset[0], y + self.offset[1], z + self.offset[2] - 1
+        ix, iy, iz = VoxelWorld.world_to_index(x, y, z, self.world_array.shape[0])
         voxel_type_int = self.world_array[ix, iy, iz]
         return voxel_type_map[voxel_type_int]
 
     def set_voxel(self, x, y, z, voxel_type: VoxelType):
-        ix, iy, iz = x + self.offset[0], y + self.offset[1], z + self.offset[2] - 1        
+        ix, iy, iz = VoxelWorld.world_to_index(x, y, z, self.world_array.shape[0])
         self.world_array[ix, iy, iz] = voxel_type.value
-
-    def get_world_array(self):
-        return self.world_array
-    
-    def shape(self):
-        return self.world_array.shape
     
     @staticmethod
     def world_to_index(x, y, z, n):

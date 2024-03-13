@@ -3,10 +3,12 @@ import numpy as np
 from multiprocessing import Pool
 
 from helper import VoxelTools, WorldTools
-
+from world import VoxelWorld
 
 class ChunkManager:
+    
     def __init__(self, game_engine):
+        self.voxel_world_map = {}
         self.game_engine = game_engine
         self.loaded_chunks = {}
         self.pool = Pool(processes=6)
@@ -15,16 +17,17 @@ class ChunkManager:
         self.chunk_radius = 0#12
         self.num_chunks = 4*int(3.14*self.chunk_radius**2)
 
+    def get_voxel_world(self, chunk_x: int, chunk_y: int) -> VoxelWorld:
+        return self.voxel_world_map.get((chunk_x, chunk_y)) 
+
     def get_player_chunk_pos(self):
         player_pos = self.game_engine.camera.getPos()
-        chunk_x = int(player_pos.x / self.game_engine.scale) // self.game_engine.chunk_size
-        chunk_y = int(player_pos.y / self.game_engine.scale) // self.game_engine.chunk_size
+        chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(player_pos, self.game_engine.voxel_size, self.game_engine.chunk_size)
         return chunk_x, chunk_y
 
     def update_chunks(self):
         T0 = time.perf_counter()
         player_chunk_x, player_chunk_y = self.get_player_chunk_pos()
-
 
         if self.previously_updated_position: 
             distance_from_center = ((player_chunk_x - self.previously_updated_position[0])**2 + 
@@ -37,7 +40,7 @@ class ChunkManager:
         # Use multiprocessing to generate chunks
         t0 = time.perf_counter()
         chunk_data = self.pool.starmap(WorldTools.generate_chunk,
-                        [(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, x, y, self.game_engine.scale) for x, y in chunks_to_load])
+                        [(self.game_engine.chunk_size, self.game_engine.max_height, self.voxel_world_map, x, y, self.game_engine.voxel_size) for x, y in chunks_to_load])
 
         # Apply textures and physics sequentially
         t1 = time.perf_counter()
@@ -47,7 +50,7 @@ class ChunkManager:
         for (x, y), (vertices, indices, voxel_world, create_world_dt, crete_mesh_dt) in zip(chunks_to_load, chunk_data):
             create_world_DT += create_world_dt
             crete_mesh_DT += crete_mesh_dt
-            self.game_engine.voxel_world_map[(x, y)] = voxel_world
+            self.voxel_world_map[(x, y)] = voxel_world
             terrainNP, terrainNode = self.game_engine.apply_texture_and_physics_to_chunk(x, y, vertices, indices)
             self.loaded_chunks[(x, y)] = (terrainNP, terrainNode, len(vertices))
 
@@ -120,15 +123,14 @@ class ChunkManager:
     def get_number_of_visible_voxels(self):
         result = 0
         for key in self.loaded_chunks.keys():
-            world = self.game_engine.voxel_world_map.get(key)
-            exposed_voxels = VoxelTools.identify_exposed_voxels(world.get_world_array())
+            world = self.voxel_world_map.get(key)
+            exposed_voxels = VoxelTools.identify_exposed_voxels(world.world_array)
             result += np.count_nonzero(exposed_voxels)
         return result
 
-
     def load_chunk(self, chunk_x, chunk_y):
         # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
-        vertices, indices, _, _, _ = WorldTools.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_world_map, chunk_x, chunk_y, self.game_engine.scale)
+        vertices, indices, _, _, _ = WorldTools.generate_chunk(self.game_engine.chunk_size, self.game_engine.max_height, self.voxel_world_map, chunk_x, chunk_y, self.game_engine.voxel_size)
         terrainNP, terrainNode = self.game_engine.apply_texture_and_physics_to_chunk(chunk_x, chunk_y, vertices, indices)
         # Store both components in the loaded_chunks dictionary
         self.loaded_chunks[(chunk_x, chunk_y)] = (terrainNP, terrainNode, len(vertices)) # TODO: Use Chunk dataclass

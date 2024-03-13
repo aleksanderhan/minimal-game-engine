@@ -2,6 +2,7 @@ import numpy as np
 import noise
 import time
 import uuid
+import math
 
 from panda3d.bullet import (
     BulletRigidBodyNode, BulletTriangleMesh, BulletTriangleMeshShape, BulletSphereShape
@@ -26,13 +27,13 @@ def toggle(a, b, yield_a=True):
 
 class DynamicArbitraryVoxelObject:
 
-    def __init__(self, voxel_array, scale, vertices, indices, mass, friction, name="VoxelObject"):
+    def __init__(self, voxel_array, voxel_size, vertices, indices, mass, friction, name="VoxelObject"):
         self.root = self
         self.parent = self.root
         self.parent_position_relative_to_grid = Vec3(0, 0, 0)
 
         self.voxel_array = voxel_array
-        self.scale = scale
+        self.voxel_size = voxel_size
         self.vertices = vertices
         self.indices = indices
         
@@ -47,22 +48,17 @@ class DynamicArbitraryVoxelObject:
         return (np.array(self.voxel_array.shape) - 1) // 2
 
     def add_voxel(self, hit_pos: Vec3, hit_normal: Vec3, voxel_type: VoxelType, game_engine):
-        print("hit_pos", hit_pos, "hit_normal", hit_normal)
-
         root_node_path = self.node_paths[(0, 0, 0)]
         root_node_pos = root_node_path.getPos()       
         orientation = root_node_path.getQuat()
-        print("root_node_pos", root_node_pos, "orientation", orientation)
-
-        world_forward = Vec3(0, 1, 0)
 
         # Use the quaternion to transform the local forward direction to world space
+        world_forward = Vec3(0, 1, 0)
         local_forward = orientation.xform(world_forward)
-        print("local_forward", local_forward)
 
-        ix = 1
-        iy = 1
-        iz = 1
+        ix = 1# TODO
+        iy = 1# TODO
+        iz = 1# TODO
 
 
         max_i, max_j, max_k = self.voxel_array.shape
@@ -72,19 +68,17 @@ class DynamicArbitraryVoxelObject:
 
         self.vertices, self.indices = VoxelTools.create_object_mesh(self)
 
-        print("voxel_array", self.voxel_array)
         body_indices = np.argwhere(self.voxel_array)
-
         parts = []
         for i, j, k in body_indices:
-            relative_position = Vec3(VoxelWorld.index_to_world(i, j, k, self.scale))
+            relative_position = Vec3(VoxelWorld.index_to_world(i, j, k, self.voxel_array.shape[0]))
             position = relative_position + root_node_pos
 
             node_np = VoxelTools.create_dynamic_single_voxel_physics_node(self, game_engine.render, game_engine.physics_world)
             node_np.setPythonTag("object", self)
             node_np.setQuat(orientation)
             node_np.setPos(position)
-            self.node_paths[(i, j, k)]  = node_np
+            self.node_paths[(i, j, k)] = node_np
             parts.append(node_np)
 
         for i in range(1, len(parts)):
@@ -128,14 +122,14 @@ class DynamicArbitraryVoxelObject:
 class VoxelTools:        
 
     @staticmethod
-    def crate_dynamic_single_voxel_object(scale: int, voxel_type: VoxelType, render, physics_world) -> DynamicArbitraryVoxelObject:
+    def crate_dynamic_single_voxel_object(voxel_size: int, voxel_type: VoxelType, render, physics_world) -> DynamicArbitraryVoxelObject:
         voxel_array = np.ones((1, 1, 1), dtype=int)
-        vertices, indices = VoxelTools.create_single_voxel_mesh(voxel_type, scale)
+        vertices, indices = VoxelTools.create_single_voxel_mesh(voxel_type, voxel_size)
 
         mass = material_properties[voxel_type]["mass"]
         friction = material_properties[voxel_type]["friction"]
         
-        object = DynamicArbitraryVoxelObject(voxel_array, scale, vertices, indices, mass, friction)
+        object = DynamicArbitraryVoxelObject(voxel_array, voxel_size, vertices, indices, mass, friction)
         object_np = VoxelTools.create_dynamic_single_voxel_physics_node(object, render, physics_world)
         object_np.setPythonTag("object", object)
         object_np.setPythonTag("ijk", (0, 0, 0))
@@ -148,7 +142,8 @@ class VoxelTools:
         voxel_type = voxel_type_map[voxel_type_int]
         material = material_properties[voxel_type]
         
-        shape = BulletSphereShape(object.scale)
+        radius = object.voxel_size / 2
+        shape = BulletSphereShape(radius)
         node = BulletRigidBodyNode(object.name)
         node.setMass(material["mass"])
         node.setFriction(material["friction"])
@@ -162,7 +157,7 @@ class VoxelTools:
         return node_np
     
     @staticmethod
-    def create_single_voxel_mesh(voxel_type: VoxelType, scale):
+    def create_single_voxel_mesh(voxel_type: VoxelType, voxel_size):
         vertices = []
         indices = []
         index_counter = 0
@@ -170,7 +165,7 @@ class VoxelTools:
         j = 0
         for face_name, normal in normals.items():
             # Generate vertices for this face
-            face_vertices = VoxelTools.generate_face_vertices(0, 0, 0, face_name, scale)
+            face_vertices = VoxelTools.generate_face_vertices(0, 0, 0, face_name, voxel_size)
             face_normals = np.tile(np.array(normal), (4, 1))
 
             uvs = uv_maps[voxel_type][face_name]
@@ -200,7 +195,7 @@ class VoxelTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            x, y, z = VoxelWorld.index_to_world(i, j, k, object.scale)
+            x, y, z = VoxelWorld.index_to_world(i, j, k, object.voxel_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(object.voxel_array, i, j, k)
 
             c = 0
@@ -208,7 +203,7 @@ class VoxelTools:
                 if face_name in exposed_faces:
                     # Generate vertices for this face
 
-                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, object.scale)
+                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, object.voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
                     voxel_type_int = object.voxel_array[i, j, k]
@@ -244,14 +239,14 @@ class VoxelTools:
         return exposed_faces
     
     @staticmethod
-    def generate_face_vertices(x, y, z, face_name, scale):
+    def generate_face_vertices(x, y, z, face_name, voxel_size):
         """
         Generates vertices and normals for a given voxel face.
 
         Args:
             x, y, z: Coordinates of the voxel in the voxel grid.
             face_name: The face to be generated
-            scale: Size of the voxel.
+            voxel_size: Size of the voxel.
 
         Returns:
             face_vertices: A list of vertex positions for the face.
@@ -259,7 +254,7 @@ class VoxelTools:
         face_offsets = offset_arrays[face_name]
 
         # Calculate vertex positions vectorized
-        face_vertices = (np.array([x, y, z]) + face_offsets * scale).astype(float)
+        face_vertices = (np.array([x, y, z]) + face_offsets).astype(float)
 
         return face_vertices
     
@@ -307,45 +302,53 @@ class VoxelTools:
 
 class WorldTools:
 
-    @staticmethod
-    def calculate_voxel_position_from(raycast_result, scale: float, chunk_size: int) -> Vec3:
+    @staticmethod   
+    def get_center_of_hit_static_voxel(raycast_result, voxel_size: float) -> Vec3:
         hit_pos = raycast_result.getHitPos()
-        world_center = Vec3(chunk_size * scale / 2, chunk_size * scale / 2, chunk_size * scale / 2)
-        # Adjusting hit position to be relative to the world's center
-        adjusted_hit_pos = hit_pos + world_center
+        hit_normal = raycast_result.getHitNormal()
 
-        # Convert hit position to voxel grid indices accurately
-        indices = adjusted_hit_pos / scale
-        indices = Vec3(int(indices.x), int(indices.y), int(indices.z))
+        # Discretize hit position to the voxel grid
+        grid_x = round(hit_pos.x / voxel_size) * voxel_size
+        grid_y = round(hit_pos.y / voxel_size) * voxel_size
+        grid_z = round(hit_pos.z / voxel_size) * voxel_size
 
-        # Recalculate the exact center position of the voxel
-        voxel_center = (indices + Vec3(0.5, 0.5, 0.5)) * scale - world_center
+        # Approximate voxel center
+        face_center = Vec3(grid_x, grid_y, grid_z)
 
-        return voxel_center
+        return face_center - hit_normal * voxel_size / 2
     
     @staticmethod
-    def generate_chunk(chunk_size: int, max_height: int, voxel_world_map: dict, chunk_x: int, chunk_y: int, scale: float):
+    def get_center_of_hit_dynamic_voxel(raycast_result) -> Vec3:
+        hit_node = raycast_result.getNode()
+        hit_object = hit_node.getPythonTag("object")
+        ijk = hit_node.getPythonTag("ijk")
+
+        node_np = hit_object.node_paths[ijk]
+        return node_np.getPos()
+    
+    @staticmethod
+    def generate_chunk(chunk_size: int, max_height: int, voxel_world_map: dict, chunk_x: int, chunk_y: int, voxel_size: float):
         t0 = time.perf_counter()
         voxel_world = WorldTools.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
         t1 = time.perf_counter()
-        vertices, indices = WorldTools.create_world_mesh(voxel_world, scale)
+        vertices, indices = WorldTools.create_world_mesh(voxel_world, voxel_size)
         t2 = time.perf_counter()
         return vertices, indices, voxel_world, t1-t0, t2-t1
     
     @staticmethod
-    def create_world_mesh(voxel_world: VoxelWorld, scale: float):
+    def create_world_mesh(voxel_world: VoxelWorld, voxel_size: float):
         """Efficiently creates mesh data for exposed voxel faces.
 
         Args:
             voxel_world: 3D NumPy array representing voxel types.
-            scale: The size of each voxel in world units.
+            voxel_size: The size of each voxel in world units.
 
         Returns:
-                vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
-                indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
+            vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
+            indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
         """
 
-        exposed_voxels = VoxelTools.identify_exposed_voxels(voxel_world.get_world_array())
+        exposed_voxels = VoxelTools.identify_exposed_voxels(voxel_world.world_array)
 
         vertices = []
         indices = []
@@ -354,15 +357,15 @@ class WorldTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            x, y, z = VoxelWorld.index_to_world(i, j, k, voxel_world.shape()[0])
-            exposed_faces = VoxelTools.check_surrounding_air(voxel_world.get_world_array(), i, j, k)
+            x, y, z = VoxelWorld.index_to_world(i, j, k, voxel_world.world_array.shape[0])
+            exposed_faces = VoxelTools.check_surrounding_air(voxel_world.world_array, i, j, k)
 
             c = 0
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
                     # Generate vertices for this face
 
-                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, scale)
+                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
                     voxel_type = voxel_world.get_voxel_type(x, y, z)
@@ -442,20 +445,19 @@ class WorldTools:
                              [1, 0, 0, 0, 0],
                              [0, 0, 0, 0, 0]]])
             '''
-            #world_array = np.zeros((5, 5, 5), dtype=int)
+            world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array)
 
-            #voxel_world.set_voxel(0, 0, 0, 1)
-            #voxel_world.set_voxel(0, 0, 1, 1)
-            #voxel_world.set_voxel(1, 0, 0, 1)
-            #voxel_world.set_voxel(-1, 0, 0, 1)
-            #voxel_world.set_voxel(0, 1, 0, 1)
-            #voxel_world.set_voxel(0, -1, 0, 1)
-
-            #voxel_world.set_voxel(1, -1, 0, 1)
-            #voxel_world.set_voxel(-1, -1, 0, 1)
-            #voxel_world.set_voxel(1, 1, 0, 1)
-            #voxel_world.set_voxel(-1, 1, 0, 1)
+            #voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
+            voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, 1, 0,VoxelType.STONE)
+            voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
 
 
 
@@ -506,18 +508,38 @@ class WorldTools:
         return height_map
     
     @staticmethod
-    def calculate_chunk_world_position(chunk_x: int, chunk_y: int, chunk_size: int, scale: float):
+    def calculate_chunk_world_position(chunk_x: int, chunk_y: int, chunk_size: int, voxel_size: float):
         """
-        Calculates the world position of the chunk based on its grid position.
+        Calculates the world position of the chunk origo based on its grid position.
 
         Parameters:
         - chunk_x, chunk_y: The chunk's position in the grid/map.
-        - scale: The scale factor used in the game.
+        - chunk_size: The chunk is comprised out of chunk_size x chunk_size amount of voxels
+        - voxel_size: Size of a voxel
 
         Returns:
         Tuple[float, float]: The world coordinates of the chunk.
         """
-        # Adjust these calculations based on how you define chunk positions in world space
-        world_x = chunk_x * chunk_size * scale
-        world_y = chunk_y * chunk_size * scale
-        return world_x, world_y
+        x = chunk_x * chunk_size * voxel_size
+        y = chunk_y * chunk_size * voxel_size
+
+        return x, y
+    
+    @staticmethod
+    def calculate_world_chunk_position(position: Vec3, voxel_size: float, chunk_size: int):
+        """
+        Calculates the chunk grid coordinates corresponding to a world position.
+
+        Parameters:
+        - position: A Vec3 representing the world position.
+        - voxel_size: Size of a voxel.
+        - chunk_size: Number of voxels along a single axis of the chunk.
+
+        Returns:
+        Tuple[int, int]: The chunk's grid coordinates (chunk_x, chunk_y).
+        """
+        # Calculate chunk coordinates 
+        chunk_x = int(position.x / (chunk_size * voxel_size))
+        chunk_y = int(position.y / (chunk_size * voxel_size))
+
+        return chunk_x, chunk_y
