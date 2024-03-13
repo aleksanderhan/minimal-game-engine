@@ -165,7 +165,7 @@ class GameEngine(ShowBase):
                 position = voxcel_center_pos + hit_normal * self.voxel_size
             else:
                 position = self.get_spawn_position()
-                
+
             self.placeholder_cube = self.create_translucent_cube(position)
             self.taskMgr.add(self.update_placeholder_cube, "UpdatePlaceholderCube")
         else:
@@ -184,9 +184,10 @@ class GameEngine(ShowBase):
 
                 if hit_node.name == "Terrain":
                     voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                    print("voxcel_center_pos", voxcel_center_pos)
                     position = voxcel_center_pos + hit_normal * self.voxel_size
                     orientation = LQuaternionf.identQuat()
-                    self.placeholder_cube.setPos(int(position.x), int(position.y), int(position.z))
+                    self.placeholder_cube.setPos(position)
                     self.placeholder_cube.setQuat(orientation)
                 elif hit_node.name == "VoxelObject":
                     voxcel_center_pos = WorldTools.get_center_of_hit_dynamic_voxel(raycast_result)

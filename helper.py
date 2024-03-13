@@ -308,18 +308,57 @@ class WorldTools:
 
     @staticmethod   
     def get_center_of_hit_static_voxel(raycast_result, voxel_size: float) -> Vec3:
+        """
+        Identifies the voxel hit by a raycast and returns its center position in world space.
+        
+        Parameters:
+        - raycast_result: The raycast object with a hit.
+        - voxel_size: The size of a voxel.
+        
+        Returns:
+        - Vec3: The center position of the hit voxel in world space.
+        """
         hit_pos = raycast_result.getHitPos()
         hit_normal = raycast_result.getHitNormal()
 
-        # Discretize hit position to the voxel grid
-        grid_x = round(hit_pos.x / voxel_size) * voxel_size
-        grid_y = round(hit_pos.y / voxel_size) * voxel_size
-        grid_z = round(hit_pos.z / voxel_size) * voxel_size
+        if hit_normal == Vec3(0, -1, 0) or hit_normal == Vec3(0, 1, 0) or hit_normal == Vec3(1, 0, 0) or hit_normal == Vec3(-1, 0, 0): # all side faces
+            hit_pos.z += voxel_size / 2
 
-        # Approximate voxel center
-        face_center = Vec3(grid_x, grid_y, grid_z)
+        if  hit_normal == Vec3(0, 1, 0): # Front face
+            hit_pos.y -= voxel_size/ 2
 
-        return face_center - hit_normal * voxel_size / 2
+        if hit_normal == Vec3(1, 0, 0): # right face
+            hit_pos.x -= voxel_size/ 2
+
+        if hit_normal == Vec3(-1, 0, 0): # left face
+            hit_pos.x += voxel_size/ 2
+
+        if hit_normal == Vec3(0, 0, -1): # bottom face
+            hit_pos.z += voxel_size
+
+        if hit_normal == Vec3(0, -1, 0): # back face
+            hit_pos.y += voxel_size / 2
+
+
+        # Define a minimal bias to adjust hit positions near voxel boundaries
+        bias = voxel_size * 0.01  # 1% of the voxel size
+
+        # Apply bias based on the sign of the hit position components
+        biased_x = hit_pos.x + bias if hit_pos.x > 0 else hit_pos.x - bias
+        biased_y = hit_pos.y + bias if hit_pos.y > 0 else hit_pos.y - bias
+        biased_z = hit_pos.z + bias if hit_pos.z > 0 else hit_pos.z - bias
+
+        # Convert the biased hit position to voxel grid coordinates
+        grid_x = round(biased_x / voxel_size)
+        grid_y = round(biased_y / voxel_size)
+        grid_z = round(biased_z / voxel_size)
+
+        # Calculate the center of the voxel in world coordinates
+        voxel_center_x = grid_x * voxel_size
+        voxel_center_y = grid_y * voxel_size
+        voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
+
+        return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
     
     @staticmethod
     def get_center_of_hit_dynamic_voxel(raycast_result) -> Vec3:
@@ -452,19 +491,19 @@ class WorldTools:
             world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array, voxel_size)
 
-            if chunk_x == 0 and chunk_y == 0:
-                voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
+            #if chunk_x == 0 and chunk_y == 0:
+            #    voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
             
             
             voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
-            voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
-            voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, 1, 0,VoxelType.STONE)
-            voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
+            #voxel_world.set_voxel(1, 1, 0,VoxelType.STONE)
+            #voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
 
 
 
