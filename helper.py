@@ -321,42 +321,23 @@ class WorldTools:
         hit_pos = raycast_result.getHitPos()
         hit_normal = raycast_result.getHitNormal()
 
-        if hit_normal == Vec3(0, -1, 0) or hit_normal == Vec3(0, 1, 0) or hit_normal == Vec3(1, 0, 0) or hit_normal == Vec3(-1, 0, 0): # all side faces
-            hit_pos.z += voxel_size / 2
+        # Nudge the hit position slightly towards the opposite direction of the normal
+        # This helps ensure the hit position is always considered within the voxel, even near edges
+        nudge = hit_normal * (voxel_size * 0.01)  # Nudge by 1% of the voxel size towards the voxel center
+        adjusted_hit_pos = hit_pos - nudge
 
-        if  hit_normal == Vec3(0, 1, 0): # Front face
-            hit_pos.y -= voxel_size/ 2
-
-        if hit_normal == Vec3(1, 0, 0): # right face
-            hit_pos.x -= voxel_size/ 2
-
-        if hit_normal == Vec3(-1, 0, 0): # left face
-            hit_pos.x += voxel_size/ 2
-
-        if hit_normal == Vec3(0, 0, -1): # bottom face
-            hit_pos.z += voxel_size
-
-        if hit_normal == Vec3(0, -1, 0): # back face
-            hit_pos.y += voxel_size / 2
-
-
-        # Define a minimal bias to adjust hit positions near voxel boundaries
-        bias = voxel_size * 0.01  # 1% of the voxel size
-
-        # Apply bias based on the sign of the hit position components
-        biased_x = hit_pos.x + bias if hit_pos.x > 0 else hit_pos.x - bias
-        biased_y = hit_pos.y + bias if hit_pos.y > 0 else hit_pos.y - bias
-        biased_z = hit_pos.z + bias if hit_pos.z > 0 else hit_pos.z - bias
-
-        # Convert the biased hit position to voxel grid coordinates
-        grid_x = round(biased_x / voxel_size)
-        grid_y = round(biased_y / voxel_size)
-        grid_z = round(biased_z / voxel_size)
+        # Convert the adjusted hit position to voxel grid coordinates
+        grid_x = round(adjusted_hit_pos.x / voxel_size)
+        grid_y = round(adjusted_hit_pos.y / voxel_size)
+        grid_z = round(adjusted_hit_pos.z / voxel_size)
 
         # Calculate the center of the voxel in world coordinates
         voxel_center_x = grid_x * voxel_size
         voxel_center_y = grid_y * voxel_size
         voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
+
+        if hit_normal == Vec3(0, 0, -1):
+            voxel_center_z += voxel_size
 
         return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
     
@@ -438,12 +419,12 @@ class WorldTools:
             world_array = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
-            #heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
+            #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
+            heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
             
             # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
             height_levels = np.floor(heightmap).astype(int)
-            height_levels = np.clip(height_levels, 0, max_height)
+            height_levels = np.clip(height_levels, 1, max_height)
             adjusted_height_levels = height_levels[:-1, :-1]
 
             # Create a 3D array representing each voxel's vertical index (Z-coordinate)
@@ -488,23 +469,22 @@ class WorldTools:
                              [1, 0, 0, 0, 0],
                              [0, 0, 0, 0, 0]]])
             '''
-            world_array = np.zeros((5, 5, 5), dtype=int)
+            #world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array, voxel_size)
 
-            #if chunk_x == 0 and chunk_y == 0:
-            #    voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
-            
-            
+            '''    
+            if chunk_x == 0 and chunk_y == 0:
+                voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
             voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
-            #voxel_world.set_voxel(1, 1, 0,VoxelType.STONE)
-            #voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
-
+            voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, 1, 0,VoxelType.STONE)
+            voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
+            '''
 
 
             voxel_world_map[(chunk_x, chunk_y)] = voxel_world
@@ -514,7 +494,7 @@ class WorldTools:
 
     @staticmethod
     def generate_perlin_height_map(chunk_size: int, chunk_x: int, chunk_y: int):
-        scale = 0.05  # Adjust scale to control the "zoom" level of the noise
+        scale = 0.06  # Adjust scale to control the "zoom" level of the noise
         octaves = 6  # Number of layers of noise to combine
         persistence = 0.5  # Amplitude of each octave
         lacunarity = 2.0  # Frequency of each octave
@@ -538,10 +518,10 @@ class WorldTools:
                                     lacunarity=lacunarity,
                                     repeatx=10000,  # Large repeat region to avoid repetition
                                     repeaty=10000,
-                                    base=1)  # Base can be any constant, adjust for different terrains
+                                    base=0)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 20
+                height_map[x, y] = height * 25
 
         return height_map
     

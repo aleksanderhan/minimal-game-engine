@@ -101,10 +101,10 @@ class GameEngine(ShowBase):
         #self.render.setTwoSided(True)
         
         self.voxel_size = 1
-        self.ground_height = 0
+        self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 3
+        n = 4
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -383,10 +383,10 @@ class GameEngine(ShowBase):
         bullet_model.reparentTo(bullet_np)
         bullet_np.setPos(position)
         
-        #speed = (velocity.x**2 + velocity.y**2 + velocity.z **2)**0.5 
-        #if radius <= 0.5 and speed >= 50:
-        bullet_np.node().setCcdMotionThreshold(1e-7)
-        bullet_np.node().setCcdSweptSphereRadius(radius)
+        speed = (velocity.x**2 + velocity.y**2 + velocity.z **2)**0.5 
+        if radius <= 0.5 and speed >= 50:
+            bullet_np.node().setCcdMotionThreshold(1e-7)
+            bullet_np.node().setCcdSweptSphereRadius(radius)
         
         self.physics_world.attachRigidBody(bullet_node)
         
@@ -472,7 +472,7 @@ class GameEngine(ShowBase):
             #center_y = world_y - self.chunk_size * self.voxel_size / 2
 
             # Adjust local vertex position by chunk's world position
-            global_v = Vec3(local_v.getX() + chunk_world_x, local_v.getY() + chunk_world_y, local_v.getZ())
+            global_v = Vec3(local_v.getX() + chunk_world_x, local_v.getY() + chunk_world_y, local_v.getZ() + self.ground_height)
 
             # Calculate normal end point
             normal_end = global_v + n * scale
@@ -489,8 +489,7 @@ class GameEngine(ShowBase):
         terrain_np.reparentTo(self.render)
 
         world_x, world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
-        world_z = self.ground_height + self.voxel_size / 2
-        terrain_np.setPos(world_x, world_y, world_z)
+        terrain_np.setPos(world_x, world_y, self.ground_height)
 
         if self.args.debug:
             terrain_np.setLightOff()
@@ -525,8 +524,7 @@ class GameEngine(ShowBase):
         terrain_np = self.render.attachNewNode(terrain_node)
 
         # Set the position of the terrain's physics node to match its visual representation
-        world_z = self.ground_height + self.voxel_size / 2
-        terrain_np.setPos(world_x, world_y, world_z)
+        terrain_np.setPos(world_x, world_y, self.ground_height)
 
         self.physics_world.attachRigidBody(terrain_node)
         return terrain_node
