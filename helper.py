@@ -71,8 +71,9 @@ class DynamicArbitraryVoxelObject:
         body_indices = np.argwhere(self.voxel_array)
         parts = []
         for i, j, k in body_indices:
-            relative_position = Vec3(VoxelWorld.index_to_world(i, j, k, self.voxel_array.shape[0]))
-            position = relative_position + root_node_pos
+            ix, iy, iz = VoxelWorld.index_to_voxel_grid_coordinates(i, j, k, self.voxel_array.shape[0])
+
+            position = root_node_pos
 
             node_np = VoxelTools.create_dynamic_single_voxel_physics_node(self, game_engine.render, game_engine.physics_world)
             node_np.setPythonTag("object", self)
@@ -195,7 +196,7 @@ class VoxelTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            x, y, z = VoxelWorld.index_to_world(i, j, k, object.voxel_array.shape[0])
+            ix, iy, iz = VoxelWorld.index_to_voxel_grid_coordinates(i, j, k, object.voxel_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(object.voxel_array, i, j, k)
 
             c = 0
@@ -203,7 +204,7 @@ class VoxelTools:
                 if face_name in exposed_faces:
                     # Generate vertices for this face
 
-                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, object.voxel_size)
+                    face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, object.voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
                     voxel_type_int = object.voxel_array[i, j, k]
@@ -229,32 +230,35 @@ class VoxelTools:
         max_i, max_j, max_k = array.shape[0] - 1, array.shape[1] - 1, array.shape[2] - 1
         exposed_faces = []
         
-        if i == max_i or array[i + 1, j, k] == 0: exposed_faces.append("right")
-        if i == 0 or array[i - 1, j, k] == 0: exposed_faces.append("left")
         if j == max_j or array[i, j + 1, k] == 0: exposed_faces.append("front")
         if j == 0 or array[i, j - 1, k] == 0: exposed_faces.append("back")
+        if i == max_i or array[i + 1, j, k] == 0: exposed_faces.append("right")
+        if i == 0 or array[i - 1, j, k] == 0: exposed_faces.append("left")
         if k == max_k or array[i, j, k + 1] == 0: exposed_faces.append("up")
         if k == 0 or array[i, j, k - 1] == 0: exposed_faces.append("down")
         
         return exposed_faces
     
     @staticmethod
-    def generate_face_vertices(x, y, z, face_name, voxel_size):
+    def generate_face_vertices(ix, iy, iz, face_name, voxel_size):
         """
         Generates vertices and normals for a given voxel face.
 
         Args:
-            x, y, z: Coordinates of the voxel in the voxel grid.
+            ix, iy, iz: Coordinates of the voxel in the voxel grid.
             face_name: The face to be generated
             voxel_size: Size of the voxel.
 
         Returns:
             face_vertices: A list of vertex positions for the face.
         """
-        face_offsets = offset_arrays[face_name]
+        face_offsets = offset_arrays[face_name]   
 
-        # Calculate vertex positions vectorized
-        face_vertices = (np.array([x, y, z]) + face_offsets).astype(float)
+        # Calculate the center position of the voxel in world coordinates
+        center_position = np.array([ix, iy, iz]) * voxel_size
+
+        # Then, for each face, adjust the vertices based on this center position
+        face_vertices = center_position + (face_offsets * voxel_size)
 
         return face_vertices
     
@@ -329,7 +333,7 @@ class WorldTools:
     @staticmethod
     def generate_chunk(chunk_size: int, max_height: int, voxel_world_map: dict, chunk_x: int, chunk_y: int, voxel_size: float):
         t0 = time.perf_counter()
-        voxel_world = WorldTools.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y)
+        voxel_world = WorldTools.get_voxel_world(chunk_size, max_height, voxel_world_map, chunk_x, chunk_y, voxel_size)
         t1 = time.perf_counter()
         vertices, indices = WorldTools.create_world_mesh(voxel_world, voxel_size)
         t2 = time.perf_counter()
@@ -357,7 +361,7 @@ class WorldTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            x, y, z = VoxelWorld.index_to_world(i, j, k, voxel_world.world_array.shape[0])
+            ix, iy, iz = VoxelWorld.index_to_voxel_grid_coordinates(i, j, k, voxel_world.world_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(voxel_world.world_array, i, j, k)
 
             c = 0
@@ -365,10 +369,10 @@ class WorldTools:
                 if face_name in exposed_faces:
                     # Generate vertices for this face
 
-                    face_vertices = VoxelTools.generate_face_vertices(x, y, z, face_name, voxel_size)
+                    face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type = voxel_world.get_voxel_type(x, y, z)
+                    voxel_type = voxel_world.get_voxel_type(ix, iy, iz)
                     uvs = uv_maps[voxel_type][face_name]
                     u, v = uvs[c % 4]  # Cycle through the UV coordinates for each vertex
 
@@ -386,7 +390,7 @@ class WorldTools:
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
     @staticmethod
-    def get_voxel_world(chunk_size: int, max_height: int, voxel_world_map: dict, chunk_x: int, chunk_y: int):
+    def get_voxel_world(chunk_size: int, max_height: int, voxel_world_map: dict, chunk_x: int, chunk_y: int, voxel_size: float):
         if (chunk_x, chunk_y) not in voxel_world_map:
             width = chunk_size
             depth = chunk_size
@@ -446,7 +450,7 @@ class WorldTools:
                              [0, 0, 0, 0, 0]]])
             '''
             world_array = np.zeros((5, 5, 5), dtype=int)
-            voxel_world = VoxelWorld(world_array)
+            voxel_world = VoxelWorld(world_array, voxel_size)
 
             #voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
             voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
@@ -510,7 +514,7 @@ class WorldTools:
     @staticmethod
     def calculate_chunk_world_position(chunk_x: int, chunk_y: int, chunk_size: int, voxel_size: float):
         """
-        Calculates the world position of the chunk origo based on its grid position.
+        Calculates the world position of the chunk origo based on its grid coordinates.
 
         Parameters:
         - chunk_x, chunk_y: The chunk's position in the grid/map.

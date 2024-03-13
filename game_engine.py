@@ -100,10 +100,12 @@ class GameEngine(ShowBase):
 
         #self.render.setTwoSided(True)
         
-        self.voxel_size = 1
+        self.voxel_size = 0.5
         self.ground_height = 0
         self.max_height = 50
-        self.chunk_size = 5
+
+        n = 2
+        self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
         self.object_manager = ObjectManager(self)
@@ -116,7 +118,7 @@ class GameEngine(ShowBase):
         self.placeholder_cube = None
         self.spawn_distance = 10
 
-        self.camera.setPos(0, 0, 5)
+        self.camera.setPos(-5, 0, 4)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
@@ -297,7 +299,7 @@ class GameEngine(ShowBase):
             print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
 
             voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            normal_position = voxcel_center_pos + hit_normal * self.voxel_size
+            normal_position = voxcel_center_pos + hit_normal * self.voxel_size / 2
             print("voxcel_center_pos", voxcel_center_pos)
             print("normal_position", normal_position)
         else:

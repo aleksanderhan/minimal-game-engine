@@ -70,17 +70,17 @@ color_normal_map = {
 
 
 material_properties = {
-    VoxelType.AIR: { # Air
+    VoxelType.AIR: {
         "mass": 0,
         "friction": 0,
         "coupling_strength": 0
     },
-    VoxelType.STONE: { # Stone
+    VoxelType.STONE: {
         "mass": 10,
         "friction": 100,
         "coupling_strength": 1 
     },
-    VoxelType.GRASS: { # grass
+    VoxelType.GRASS: {
         "mass": 2,
         "friction": 2,
         "coupling_strength": 0.5
