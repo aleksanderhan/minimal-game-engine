@@ -45,7 +45,7 @@ from panda3d.core import TransparencyAttrib, Material, VBase4
 
 from chunk_manager import ChunkManager
 from helper import toggle, VoxelTools, WorldTools, DynamicArbitraryVoxelObject
-from constants import color_normal_map, VoxelType, voxel_type_map
+from constants import color_normal_map, VoxelType, voxel_type_map, normal_face_map, uv_maps
 from world import VoxelWorld
 
 
@@ -97,10 +97,15 @@ class GameEngine(ShowBase):
         super().__init__()
         self.args = args
         self.texture_atlas = self.loader.loadTexture("texture_atlas.png")
+        self.texture_atlas.setWrapU(Texture.WMClamp)
+        self.texture_atlas.setWrapV(Texture.WMClamp)
+        self.texture_atlas.setMagfilter(Texture.FTNearest)
+        self.texture_atlas.setMinfilter(Texture.FTNearest)
+
 
         #self.render.setTwoSided(True)
         
-        self.voxel_size = 1
+        self.voxel_size = 0.5
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
@@ -184,7 +189,6 @@ class GameEngine(ShowBase):
 
                 if hit_node.name == "Terrain":
                     voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-                    print("voxcel_center_pos", voxcel_center_pos)
                     position = voxcel_center_pos + hit_normal * self.voxel_size
                     orientation = LQuaternionf.identQuat()
                     self.placeholder_cube.setPos(position)
@@ -237,8 +241,6 @@ class GameEngine(ShowBase):
             hit_node = raycast_result.getNode()
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
-            
-            print("hit_node", hit_node)
 
             if hit_node.name == "Terrain":
                 voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
@@ -271,7 +273,6 @@ class GameEngine(ShowBase):
         y = int(position.y - center_chunk_pos_y)
         z = int(position.z + (1 / self.voxel_size))
 
-        print(x, y, z)
         try:
             # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(x, y, z, voxel_type)
@@ -286,24 +287,22 @@ class GameEngine(ShowBase):
             hit_node = raycast_result.getNode()
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
-            print("Hit at:", hit_pos, "normal:", hit_normal)
-            print(hit_node)
-            #hit_object = hit_node.getPythonTag("object")
-            #ijk = hit_node.getPythonTag("ijk")
-            #node_path = hit_object.node_paths(ijk)
-            #position = node_path.getPos()
-            #print("ijk", ijk, "position", position)
-            position = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            print("get_center_of_hit_static_voxel", position)
-            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(position, self.chunk_size, self.voxel_size)
+            print("---------------------")
+            print("hit_pos:", hit_pos)
+            print("normal", hit_normal)
+            print("hit_node", hit_node)
+            if not hit_node.static:
+                hit_object = hit_node.getPythonTag("object")
+                ijk = hit_node.getPythonTag("ijk")
+                node_path = hit_object.node_paths[ijk]
+                position = node_path.getPos()
+                print("ijk", ijk, "position", position)
+            voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+            print("voxcel_center_pos", voxcel_center_pos)
+            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(voxcel_center_pos, self.chunk_size, self.voxel_size)
             print("chunk_x, chunk_y", chunk_x, chunk_y)
             center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
             print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
-
-            voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            normal_position = voxcel_center_pos + hit_normal * self.voxel_size / 2
-            print("voxcel_center_pos", voxcel_center_pos)
-            print("normal_position", normal_position)
         else:
             print("No hit detected.")
         print()
@@ -360,7 +359,7 @@ class GameEngine(ShowBase):
         self.create_bullet(position, velocity, radius, mass, color)
 
     def shoot_small_bullet(self):
-        return self.shoot_bullet(100, 0.5*self.voxel_size, 0.5, (1, 1, 1, 1))
+        return self.shoot_bullet(100, 0.25*self.voxel_size, 0.5, (1, 1, 1, 1))
 
     def shoot_big_bullet(self):
         return self.shoot_bullet(40, self.voxel_size, 20, (1, 0, 0, 1))
@@ -383,22 +382,19 @@ class GameEngine(ShowBase):
         bullet_model.reparentTo(bullet_np)
         bullet_np.setPos(position)
         
-        speed = (velocity.x**2 + velocity.y**2 + velocity.z **2)**0.5 
-        if radius <= 0.5 and speed >= 50:
-            bullet_np.node().setCcdMotionThreshold(1e-7)
-            bullet_np.node().setCcdSweptSphereRadius(radius)
+        bullet_np.node().setCcdMotionThreshold(1e-7)
+        bullet_np.node().setCcdSweptSphereRadius(2*radius)
         
         self.physics_world.attachRigidBody(bullet_node)
         
         return bullet_np
 
     @staticmethod
-    def create_geometry(vertices, indices, name="geom_node"):
+    def create_geometry(vertices, indices, name="geom_node", debug=False):
         vdata = GeomVertexData('voxel_data', GameEngine.vertex_format_with_color(), Geom.UHStatic)
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
         normal_writer = GeomVertexWriter(vdata, 'normal')
-        color_writer = GeomVertexWriter(vdata, 'color')
         texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
 
         for i in range(0, len(vertices), 8):  # 8 components per vertex: 3 position, 3 normal, 2 texcoord
@@ -406,9 +402,12 @@ class GameEngine(ShowBase):
             normal_writer.addData3f(vertices[i+3], vertices[i+4], vertices[i+5])
             texcoord_writer.addData2f(vertices[i+6], vertices[i+7])
 
-            dx, dy, dz = vertices[i+3], vertices[i+4], vertices[i+5]
-            color = color_normal_map[(dx, dy, dz)]
-            color_writer.addData4f(color)
+        if debug:
+            color_writer = GeomVertexWriter(vdata, 'color')
+            for i in range(0, len(vertices), 8):
+                dx, dy, dz = vertices[i+3], vertices[i+4], vertices[i+5]
+                color = color_normal_map[(dx, dy, dz)]
+                color_writer.addData4f(color)
 
         # Create triangles using indices
         tris = GeomTriangles(Geom.UHStatic)
@@ -452,7 +451,6 @@ class GameEngine(ShowBase):
         - scale: The scale factor used for the visualization length of normals.
         """
         chunk_world_x, chunk_world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
-        print("chunk_world_x, chunk_world_y", chunk_world_x, chunk_world_y)
 
         lines_np = NodePath("normals_visualization")
         lines = LineSegs()
@@ -467,9 +465,6 @@ class GameEngine(ShowBase):
         while not vertex_reader.isAtEnd():
             local_v = vertex_reader.getData3f()
             n = normal_reader.getData3f()
-
-            #center_x = world_x - self.chunk_size * self.voxel_size / 2
-            #center_y = world_y - self.chunk_size * self.voxel_size / 2
 
             # Adjust local vertex position by chunk's world position
             global_v = Vec3(local_v.getX() + chunk_world_x, local_v.getY() + chunk_world_y, local_v.getZ() + self.ground_height)

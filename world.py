@@ -20,7 +20,6 @@ class VoxelWorld:
     
     @staticmethod
     def voxel_grid_coordinates_to_index(ix, iy, iz, n):
-        print("x, y, z, n, voxel_size", ix, iy, iz, n)
         """
         Convert world coordinates (ix, iy, iz) to array indices (i, j, k).
         

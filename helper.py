@@ -91,9 +91,6 @@ class DynamicArbitraryVoxelObject:
                 constraint.setParam(i, 0, 0) 
             game_engine.physics_world.attachConstraint(constraint)
 
-
-
-        print()
         return root_node_pos, orientation
 
     def extend_array_uniformly(self):
@@ -323,7 +320,7 @@ class WorldTools:
 
         # Nudge the hit position slightly towards the opposite direction of the normal
         # This helps ensure the hit position is always considered within the voxel, even near edges
-        nudge = hit_normal * (voxel_size * 0.01)  # Nudge by 1% of the voxel size towards the voxel center
+        nudge = hit_normal * (voxel_size * 0.015)  # Nudge by 1.5% of the voxel size towards the voxel center
         adjusted_hit_pos = hit_pos - nudge
 
         # Convert the adjusted hit position to voxel grid coordinates
@@ -436,39 +433,13 @@ class WorldTools:
             # Apply the mask to the voxel world
             world_array[mask] = 1
 
+            choices = (
+                VoxelType.STONE.value,
+                VoxelType.GRASS.value
+            )
 
+            world_array = np.where(world_array == 1, np.random.choice(choices, size=world_array.shape), world_array)
 
-            '''
-            world_array = np.array([[[0, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0]],
-
-                            [[0, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0]],
-
-                            [[0, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0]],
-
-                            [[0, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0]],
-
-                            [[0, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [1, 0, 0, 0, 0],
-                             [0, 0, 0, 0, 0]]])
-            '''
             #world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array, voxel_size)
 
@@ -497,7 +468,7 @@ class WorldTools:
         scale = 0.06  # Adjust scale to control the "zoom" level of the noise
         octaves = 6  # Number of layers of noise to combine
         persistence = 0.5  # Amplitude of each octave
-        lacunarity = 2.0  # Frequency of each octave
+        lacunarity = 1.5  # Frequency of each octave
 
         height_map = np.zeros((chunk_size + 1, chunk_size + 1))
 
@@ -521,7 +492,7 @@ class WorldTools:
                                     base=0)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 25
+                height_map[x, y] = height * 30
 
         return height_map
     
