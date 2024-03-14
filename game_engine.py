@@ -42,10 +42,11 @@ import time
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
 from panda3d.core import TransparencyAttrib, Material, VBase4
+from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
 from helper import toggle, VoxelTools, WorldTools, DynamicArbitraryVoxelObject
-from constants import color_normal_map, VoxelType, voxel_type_map, normal_face_map, uv_maps
+from constants import color_normal_map, VoxelType, material_properties, voxel_type_map
 from world import VoxelWorld
 
 
@@ -67,13 +68,9 @@ class ObjectManager:
         self.objects[object.id] = object
         root_node_path = object.node_paths[(0, 0, 0)]
 
-        geom_np = GameEngine.create_geometry(object.vertices, object.indices)
-        geom_np.setTexture(self.game_engine.texture_atlas)
+        geom_np = GameEngine.create_geometry(object.vertices, object.indices, debug=self.game_engine.args.debug)
         geom_np.reparentTo(self.game_engine.render)
         geom_np.reparentTo(root_node_path)
-
-        if self.game_engine.args.debug:
-            geom_np.setLightOff()
 
         root_node_path.setPos(position)
         root_node_path.setQuat(orientation)     
@@ -96,28 +93,19 @@ class GameEngine(ShowBase):
     def __init__(self, args):
         super().__init__()
         self.args = args
-        self.texture_atlas = self.loader.loadTexture("texture_atlas.png")
-        self.texture_atlas.setWrapU(Texture.WMClamp)
-        self.texture_atlas.setWrapV(Texture.WMClamp)
-        self.texture_atlas.setMagfilter(Texture.FTNearest)
-        self.texture_atlas.setMinfilter(Texture.FTNearest)
-
 
         #self.render.setTwoSided(True)
+        print("isThreadingSupported", Thread.isThreadingSupported())
         
         self.voxel_size = 0.5
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 4
+        n = 7
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
         self.object_manager = ObjectManager(self)
-        self.texture_paths = {
-            "stone": "assets/stone.jpeg",
-            "grass": "assets/grass.png"
-        }
 
         self.build_mode = False
         self.placeholder_cube = None
@@ -165,9 +153,9 @@ class GameEngine(ShowBase):
             raycast_result = self.cast_ray_from_camera(self.spawn_distance)
 
             if raycast_result.hasHit():
-                voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
                 hit_normal = raycast_result.getHitNormal()
-                position = voxcel_center_pos + hit_normal * self.voxel_size
+                position = voxel_center_pos + hit_normal * self.voxel_size
             else:
                 position = self.get_spawn_position()
 
@@ -188,15 +176,15 @@ class GameEngine(ShowBase):
                 hit_normal = raycast_result.getHitNormal()
 
                 if hit_node.name == "Terrain":
-                    voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-                    position = voxcel_center_pos + hit_normal * self.voxel_size
+                    voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                    position = voxel_center_pos + hit_normal * self.voxel_size
                     orientation = LQuaternionf.identQuat()
                     self.placeholder_cube.setPos(position)
                     self.placeholder_cube.setQuat(orientation)
                 elif hit_node.name == "VoxelObject":
-                    voxcel_center_pos = WorldTools.get_center_of_hit_dynamic_voxel(raycast_result)
+                    voxel_center_pos = WorldTools.get_center_of_hit_dynamic_voxel(raycast_result)
                     hit_object = hit_node.getPythonTag("object")
-                    position = voxcel_center_pos + hit_normal * self.voxel_size
+                    position = voxel_center_pos + hit_normal * self.voxel_size
                     self.placeholder_cube.setPos(position)
                     self.placeholder_cube.setQuat(hit_object.get_orientation())
             else:
@@ -214,7 +202,7 @@ class GameEngine(ShowBase):
 
     def create_translucent_cube(self, position):
         vertices, indices = VoxelTools.create_single_voxel_mesh(VoxelType.AIR, self.voxel_size)
-        cube = GameEngine.create_geometry(vertices, indices)
+        cube = GameEngine.create_geometry(vertices, indices, debug=self.args.debug)
         
         # Set the cube's scale and position
         #cube.setScale(self.voxel_size) # scale != voxel_size
@@ -243,8 +231,8 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.name == "Terrain":
-                voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-                create_position = voxcel_center_pos + hit_normal * self.voxel_size
+                voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                create_position = voxel_center_pos + hit_normal * self.voxel_size
                 self.create_static_voxel(create_position)
             elif hit_node.name == "VoxelObject":
                 hit_object = hit_node.getPythonTag("object")  
@@ -297,15 +285,29 @@ class GameEngine(ShowBase):
                 node_path = hit_object.node_paths[ijk]
                 position = node_path.getPos()
                 print("ijk", ijk, "position", position)
-            voxcel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            print("voxcel_center_pos", voxcel_center_pos)
-            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(voxcel_center_pos, self.chunk_size, self.voxel_size)
+            voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+            print("voxel_center_pos", voxel_center_pos)
+            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(voxel_center_pos, self.chunk_size, self.voxel_size)
             print("chunk_x, chunk_y", chunk_x, chunk_y)
             center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
             print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
+
+            info_text = f"""
+                Hit position: {hit_pos}
+                Hit normal: {hit_normal}
+                Hit voxel center: {voxel_center_pos}
+            """
+
+            self.info = OnscreenText(text=info_text, pos=(1, -0.8), scale=0.05, fg=(1, 1, 1, 1), align=TextNode.ARight, mayChange=True)
+            # Set up the task to remove the text
+            self.doMethodLater(5, self.remove_info_text, "RemoveInfoText")
         else:
             print("No hit detected.")
         print()
+
+    def remove_info_text(self, task):
+        self.info_text.destroy()
+        return task.done
 
     def cast_ray_from_camera(self, distance=10):
         """Casts a ray from the camera to detect voxels."""
@@ -321,7 +323,7 @@ class GameEngine(ShowBase):
         return self.physics_world.rayTestClosest(start_point, end_point)      
 
     def setup_lighting(self):
-        self.setBackgroundColor(0.53, 0.81, 0.98, 1)  # Set the background to light blue
+        self.setBackgroundColor(0.53, 0.81, 0.98, 0.6)  # Set the background to light blue
         # Ambient Light
         ambient_light = AmbientLight('ambient_light')
         ambient_light.setColor((0.2, 0.2, 0.2, 1))
@@ -383,7 +385,7 @@ class GameEngine(ShowBase):
         bullet_np.setPos(position)
         
         bullet_np.node().setCcdMotionThreshold(1e-7)
-        bullet_np.node().setCcdSweptSphereRadius(2*radius)
+        bullet_np.node().setCcdSweptSphereRadius(radius)
         
         self.physics_world.attachRigidBody(bullet_node)
         
@@ -395,19 +397,21 @@ class GameEngine(ShowBase):
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
         normal_writer = GeomVertexWriter(vdata, 'normal')
-        texcoord_writer = GeomVertexWriter(vdata, 'texcoord')
+        color_writer = GeomVertexWriter(vdata, 'color')
 
-        for i in range(0, len(vertices), 8):  # 8 components per vertex: 3 position, 3 normal, 2 texcoord
+        for i in range(0, len(vertices), 7):  # 7 components per vertex: 3 position, 3 normal, 1 voxel_type
             vertex_writer.addData3f(vertices[i], vertices[i+1], vertices[i+2])
             normal_writer.addData3f(vertices[i+3], vertices[i+4], vertices[i+5])
-            texcoord_writer.addData2f(vertices[i+6], vertices[i+7])
 
-        if debug:
-            color_writer = GeomVertexWriter(vdata, 'color')
-            for i in range(0, len(vertices), 8):
+            if debug:
                 dx, dy, dz = vertices[i+3], vertices[i+4], vertices[i+5]
-                color = color_normal_map[(dx, dy, dz)]
-                color_writer.addData4f(color)
+                color = (dx, dy, dz, 0.8) #color_normal_map[(dx, dy, dz)]
+            else:
+                voxel_type_value = int(vertices[i+6])
+                voxel_type = voxel_type_map[voxel_type_value]
+                color = material_properties[voxel_type]["color"]
+            #print(color)
+            color_writer.addData4f(color)
 
         # Create triangles using indices
         tris = GeomTriangles(Geom.UHStatic)
@@ -479,8 +483,7 @@ class GameEngine(ShowBase):
         lines_np.reparentTo(self.render)
 
     def apply_texture_and_physics_to_chunk(self, chunk_x, chunk_y, vertices, indices):
-        terrain_np = GameEngine.create_geometry(vertices, indices)
-        terrain_np.setTexture(self.texture_atlas)
+        terrain_np = GameEngine.create_geometry(vertices, indices, debug=self.args.debug)
         terrain_np.reparentTo(self.render)
 
         world_x, world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
@@ -500,10 +503,9 @@ class GameEngine(ShowBase):
     def add_terrain_mesh_to_physics(self, vertices, indices, world_x, world_y):
         terrainMesh = BulletTriangleMesh()
         
-        # Loop through the indices to get triangles. Since vertices now include texture coords,
-        # extract only the position data (first three components) for BulletPhysics.
+        # Loop through the indices to get triangles. Since vertices now include vertex_type
         for i in range(0, len(indices), 3):
-            idx0, idx1, idx2 = indices[i] * 8, indices[i+1] * 8, indices[i+2] * 8
+            idx0, idx1, idx2 = indices[i] * 7, indices[i+1] * 7, indices[i+2] * 7
             
             # Extract the position data from the flattened vertices array.
             v0 = vertices[idx0:idx0+3]  # Extracts x, y, z for vertex 0
@@ -593,7 +595,7 @@ class GameEngine(ShowBase):
     def init_fps_counter(self):
         """Initializes the FPS counter on the screen."""
         self.fps_counter = OnscreenText(text="FPS: 0", pos=(-1.3, 0.9), scale=0.07,
-                                        fg=(1, 1, 1, 1), align=TextNode.ALeft)
+                                        fg=(1, 1, 1, 1), align=TextNode.ALeft, mayChange=True)
 
     def update_fps_counter(self, task):
         """Updates the FPS counter with the current frame rate."""

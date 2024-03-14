@@ -1,6 +1,7 @@
 import time
 import numpy as np
 from multiprocessing import Pool
+from direct.stdpy import threading
 
 from helper import VoxelTools, WorldTools
 from world import VoxelWorld

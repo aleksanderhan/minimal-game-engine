@@ -136,8 +136,8 @@ class VoxelTools:
 
     @staticmethod
     def create_dynamic_single_voxel_physics_node(object: DynamicArbitraryVoxelObject, render, physics_world):
-        voxel_type_int = object.voxel_array[0, 0, 0]
-        voxel_type = voxel_type_map[voxel_type_int]
+        voxel_type_value = object.voxel_array[0, 0, 0]
+        voxel_type = voxel_type_map[voxel_type_value]
         material = material_properties[voxel_type]
         
         radius = object.voxel_size / 2
@@ -166,12 +166,9 @@ class VoxelTools:
             face_vertices = VoxelTools.generate_face_vertices(0, 0, 0, face_name, voxel_size)
             face_normals = np.tile(np.array(normal), (4, 1))
 
-            uvs = uv_maps[voxel_type][face_name]
-            u, v = uvs[j % 4]  # Cycle through the UV coordinates for each vertex
-
             # Append generated vertices, normals, and texture coordinates to the list
             for fv, fn in zip(face_vertices, face_normals):
-                vertices.extend([*fv, *fn, u, v])
+                vertices.extend([*fv, *fn, voxel_type.value])
             
             # Create indices for two triangles making up the face
             indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
@@ -204,14 +201,11 @@ class VoxelTools:
                     face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, object.voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type_int = object.voxel_array[i, j, k]
-                    voxel_type = voxel_type_map[voxel_type_int]
-                    uvs = uv_maps[voxel_type][face_name]
-                    u, v = uvs[c % 4]  # Cycle through the UV coordinates for each vertex
+                    voxel_type_value = object.voxel_array[i, j, k]
 
-                    # Append generated vertices, normals, and texture coordinates to the list
+                    # Append generated vertices, normals, and color to the list
                     for fv, fn in zip(face_vertices, face_normals):
-                        vertices.extend([*fv, *fn, u, v])
+                        vertices.extend([*fv, *fn, voxel_type_value])
                     
                     # Create indices for two triangles making up the face
                     indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
@@ -304,7 +298,7 @@ class VoxelTools:
 class WorldTools:
 
     @staticmethod   
-    def get_center_of_hit_static_voxel(raycast_result, voxel_size: float) -> Vec3:
+    def get_center_of_hit_static_voxel2(raycast_result, voxel_size: float) -> Vec3:
         """
         Identifies the voxel hit by a raycast and returns its center position in world space.
         
@@ -333,8 +327,43 @@ class WorldTools:
         voxel_center_y = grid_y * voxel_size
         voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
 
-        if hit_normal == Vec3(0, 0, -1):
-            voxel_center_z += voxel_size
+        #if hit_normal == Vec3(0, 0, -1):
+        #    voxel_center_z += voxel_size
+
+        return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
+    
+    @staticmethod   
+    def get_center_of_hit_static_voxel(raycast_result, voxel_size: float) -> Vec3:
+        """
+        Identifies the voxel hit by a raycast and returns its center position in world space.
+        
+        Parameters:
+        - raycast_result: The raycast object with a hit.
+        - voxel_size: The size of a voxel.
+        
+        Returns:
+        - Vec3: The center position of the hit voxel in world space.
+        """
+        hit_pos = raycast_result.getHitPos()
+        hit_normal = raycast_result.getHitNormal()
+
+        # Define a minimal bias to adjust hit positions near voxel boundaries
+        bias = voxel_size * 0.01  # 1% of the voxel size
+
+        # Apply bias based on the sign of the hit position components
+        biased_x = hit_pos.x + bias if hit_pos.x > 0 else hit_pos.x - bias
+        biased_y = hit_pos.y + bias if hit_pos.y > 0 else hit_pos.y - bias
+        biased_z = hit_pos.z + bias if hit_pos.z > 0 else hit_pos.z - bias
+
+        # Convert the biased hit position to voxel grid coordinates
+        grid_x = round(biased_x / voxel_size)
+        grid_y = round(biased_y / voxel_size)
+        grid_z = round(biased_z / voxel_size)
+
+        # Calculate the center of the voxel in world coordinates
+        voxel_center_x = grid_x * voxel_size
+        voxel_center_y = grid_y * voxel_size
+        voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
 
         return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
     
@@ -381,28 +410,24 @@ class WorldTools:
             ix, iy, iz = VoxelWorld.index_to_voxel_grid_coordinates(i, j, k, voxel_world.world_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(voxel_world.world_array, i, j, k)
 
-            c = 0
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
                     # Generate vertices for this face
-
                     face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
                     voxel_type = voxel_world.get_voxel_type(ix, iy, iz)
-                    uvs = uv_maps[voxel_type][face_name]
-                    u, v = uvs[c % 4]  # Cycle through the UV coordinates for each vertex
 
                     # Append generated vertices, normals, and texture coordinates to the list
                     for fv, fn in zip(face_vertices, face_normals):
-                        vertices.extend([*fv, *fn, u, v])
+                        vertices.extend([*fv, *fn, voxel_type.value])
                     
                     # Create indices for two triangles making up the face
                     indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
                         index_counter + 2, index_counter + 3, index_counter])
                     
                     index_counter += 4
-                    c += 1
+
 
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
     
@@ -416,8 +441,8 @@ class WorldTools:
             world_array = np.zeros((width, depth, max_height), dtype=int)
             
             # Generate or retrieve heightmap for this chunk
-            #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
-            heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
+            heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
+            #heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_x, chunk_y)
             
             # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
             height_levels = np.floor(heightmap).astype(int)
@@ -445,7 +470,7 @@ class WorldTools:
 
             '''    
             if chunk_x == 0 and chunk_y == 0:
-                voxel_world.set_voxel(0, 0, 1, VoxelType.STONE)
+                voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
             voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
             voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
             voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
@@ -453,7 +478,7 @@ class WorldTools:
             voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
             voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
             voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, 1, 0,VoxelType.STONE)
+            voxel_world.set_voxel(1, 1, 0, VoxelType.STONE)
             voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
             '''
 
