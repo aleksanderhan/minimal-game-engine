@@ -1,53 +1,42 @@
 import numpy as np
-import noise
 import pyautogui
 import argparse
 import copy
+import random
+
+from math import cos, sin, radians
+from functools import lru_cache
 
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
 from direct.showbase.InputStateGlobal import inputState
 from direct.gui.OnscreenText import OnscreenText
-from direct.actor.Actor import Actor
+from direct.gui.OnscreenImage import OnscreenImage
 
 from panda3d.core import (
-    AmbientLight, CardMaker, DirectionalLight, Geom, GeomNode, GeomTriangles,
-    GeomVertexData, GeomVertexFormat, GeomVertexWriter, KeyboardButton, LColor,
-    LineSegs, Material, NodePath, TextNode, Vec3, Vec4, WindowProperties,
+    AmbientLight, DirectionalLight, Geom, GeomNode, GeomTriangles,
+    GeomVertexData, GeomVertexFormat, GeomVertexWriter, KeyboardButton,
+    LineSegs, Material, TextNode, WindowProperties,
     loadPrcFileData, GeomVertexReader, LQuaternionf
 )
 from panda3d.bullet import (
-    BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
-    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape
+    BulletWorld, BulletRigidBodyNode, BulletSphereShape,
+    BulletTriangleMesh, BulletTriangleMeshShape, BulletClosestHitRayResult
 )
-from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
-from panda3d.core import NodePath, Point3
-from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCylinderShape, BulletHingeConstraint, BulletDebugNode
-from panda3d.core import Vec3, TransformState
-from math import cos, sin, radians
-from panda3d.core import Texture
-import random
-from panda3d.bullet import BulletBoxShape
-from panda3d.bullet import BulletGenericConstraint
-from direct.gui.OnscreenImage import OnscreenImage
+from panda3d.bullet import BulletRigidBodyNode
+from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletDebugNode
+from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
-from functools import lru_cache 
 from panda3d.core import WindowProperties
-from panda3d.core import CollisionNode, CollisionSphere, CollisionBox, CollisionTraverser, CollisionHandlerEvent
-from panda3d.core import BitMask32
-from panda3d.bullet import BulletGhostNode
-from scipy.interpolate import interp2d
-from PIL import Image
-import time
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
 from panda3d.core import TransparencyAttrib, Material, VBase4
 from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
-from helper import toggle, VoxelTools, WorldTools, DynamicArbitraryVoxelObject
-from constants import color_normal_map, VoxelType, material_properties, voxel_type_map
-from world import VoxelWorld
+from voxel import toggle, VoxelTools, DynamicArbitraryVoxelObject
+from constants import VoxelType, material_properties, voxel_type_map
+from world import VoxelWorld, WorldTools
 
 
 random.seed(1337)
@@ -95,17 +84,19 @@ class GameEngine(ShowBase):
         self.args = args
 
         #self.render.setTwoSided(True)
+        #self.taskMgr.popupControls()
         print("isThreadingSupported", Thread.isThreadingSupported())
         
         self.voxel_size = 0.5
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 7
+        n = 5
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
         self.object_manager = ObjectManager(self)
+        self.info_display = None
 
         self.build_mode = False
         self.placeholder_cube = None
@@ -126,7 +117,6 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
         self.taskMgr.add(self.update_physics, "UpdatePhysics")
-        self.taskMgr.add(self.update_terrain, "UpdateTerrain")
 
         self.accept('mouse1', self.shoot_small_bullet)  # Listen for left mouse click
         self.accept('mouse3', self.shoot_big_bullet) # Listen for right mouse click
@@ -141,10 +131,11 @@ class GameEngine(ShowBase):
         pass
 
     def print_world_info(self):
-        chunk_x, chunk_y = self.chunk_manager.get_player_chunk_pos()
-        voxel_world = self.chunk_manager.get_voxel_world(chunk_x, chunk_y)
+        num_vertices = self.chunk_manager.get_number_of_loaded_vertices()
+        num_surface_voxels = self.chunk_manager.get_number_of_visible_voxels()
         print("--- World info ---")
-        print("Voxel world:\n", voxel_world.world_array)
+        print("Number of vertices:", num_vertices)
+        print("Number of surface voxels:", num_surface_voxels)
 
     def toggle_build_mode(self):
         self.build_mode = not self.build_mode
@@ -167,7 +158,7 @@ class GameEngine(ShowBase):
                 self.placeholder_cube.removeNode()
                 self.placeholder_cube = None
 
-    def update_placeholder_cube(self, task):
+    def update_placeholder_cube(self, task: Task) -> int:
         if self.placeholder_cube is not None:
             raycast_result = self.cast_ray_from_camera(self.spawn_distance)
             
@@ -195,12 +186,12 @@ class GameEngine(ShowBase):
 
         return Task.cont
     
-    def get_spawn_position(self):
+    def get_spawn_position(self) -> Vec3:
         # Calculate the exact position 10 meter in front of the camera
         forward_vec = self.camera.getQuat().getForward()
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
-    def create_translucent_cube(self, position):
+    def create_translucent_cube(self, position: Vec3):
         vertices, indices = VoxelTools.create_single_voxel_mesh(VoxelType.AIR, self.voxel_size)
         cube = GameEngine.create_geometry(vertices, indices, debug=self.args.debug)
         
@@ -245,31 +236,32 @@ class GameEngine(ShowBase):
             orientation = self.camera.getQuat()
             self.create_dynamic_voxel(position, orientation)
 
-    def create_dynamic_voxel(self, position: Vec3, orientation: Vec3, voxel_type: VoxelType=VoxelType.STONE):
+    def create_dynamic_voxel(self, position: Vec3, orientation: Vec3, voxel_type: VoxelType = VoxelType.STONE):
         print("creating dynamic voxel, position:", position, "orientation", orientation)
         object = VoxelTools.crate_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world)
         self.object_manager.register_object(object, position, orientation)
 
-    def create_static_voxel(self, position: Vec3, voxel_type: VoxelType=VoxelType.STONE):
+    def create_static_voxel(self, position: Vec3, voxel_type: VoxelType = VoxelType.STONE):
         print("creating static voxel, position:", position)
+        coordinates = WorldTools.calculate_world_chunk_coordinates(position, self.chunk_size, self.voxel_size)
+        voxel_world = self.chunk_manager.get_voxel_world(coordinates)
 
-        chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(position, self.chunk_size, self.voxel_size)
-        voxel_world = self.chunk_manager.get_voxel_world(chunk_x, chunk_y)
-
-        center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
-        x = int(position.x - center_chunk_pos_x)
-        y = int(position.y - center_chunk_pos_y)
+        center_chunk_pos = WorldTools.calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
+        x = int(position.x - center_chunk_pos.x)
+        y = int(position.y - center_chunk_pos.y)
         z = int(position.z + (1 / self.voxel_size))
 
+        print(voxel_world.world_array.shape)
+        print("x, y, z", x, y, z)
         try:
             # Set the voxel type at the calculated local coordinates
-            voxel_world.set_voxel(x, y, z, voxel_type)
-            self.chunk_manager.load_chunk(chunk_x, chunk_y)
+            voxel_world = voxel_world.set_voxel(x, y, z, voxel_type)
+            self.chunk_manager.load_chunk(coordinates, voxel_world)
             pass
         except Exception as e:
             print(e)
     
-    def manual_raycast_test(self):
+    def manual_raycast_test(self):        
         raycast_result = self.cast_ray_from_camera(10000)
         if raycast_result.hasHit():
             hit_node = raycast_result.getNode()
@@ -287,9 +279,9 @@ class GameEngine(ShowBase):
                 print("ijk", ijk, "position", position)
             voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
             print("voxel_center_pos", voxel_center_pos)
-            chunk_x, chunk_y = WorldTools.calculate_world_chunk_position(voxel_center_pos, self.chunk_size, self.voxel_size)
-            print("chunk_x, chunk_y", chunk_x, chunk_y)
-            center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
+            chunk_coords = WorldTools.calculate_world_chunk_coordinates(voxel_center_pos, self.chunk_size, self.voxel_size)
+            print("chunk_coords", chunk_coords)
+            center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_coords, self.chunk_size, self.voxel_size)
             print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
 
             info_text = f"""
@@ -297,19 +289,22 @@ class GameEngine(ShowBase):
                 Hit normal: {hit_normal}
                 Hit voxel center: {voxel_center_pos}
             """
-
-            self.info = OnscreenText(text=info_text, pos=(1, -0.8), scale=0.05, fg=(1, 1, 1, 1), align=TextNode.ARight, mayChange=True)
-            # Set up the task to remove the text
-            self.doMethodLater(5, self.remove_info_text, "RemoveInfoText")
         else:
-            print("No hit detected.")
-        print()
+            info_text = "No hit detected!"
+        
+        if self.info_display:
+            self.info_display.destroy()
+    
+        self.info_display = OnscreenText(text=info_text, pos=(1, -0.8), scale=0.05, fg=(1, 1, 1, 1), align=TextNode.ARight, mayChange=True)
+        # Set up the task to remove the text
+        self.doMethodLater(5, self.remove_info_text, "RemoveInfoText")
+        
 
-    def remove_info_text(self, task):
-        self.info_text.destroy()
-        return task.done
+    def remove_info_text(self, task: Task) -> int:
+        self.info_display.destroy()
+        return Task.done
 
-    def cast_ray_from_camera(self, distance=10):
+    def cast_ray_from_camera(self, distance: float = 10.0) -> BulletClosestHitRayResult:
         """Casts a ray from the camera to detect voxels."""
         # Get the camera's position and direction
         cam_pos = self.camera.getPos()
@@ -320,8 +315,8 @@ class GameEngine(ShowBase):
         end_point = cam_pos + cam_dir * distance  # Adjust the distance as needed
         
         # Perform the raycast
-        return self.physics_world.rayTestClosest(start_point, end_point)      
-
+        return self.physics_world.rayTestClosest(start_point, end_point)
+    
     def setup_lighting(self):
         self.setBackgroundColor(0.53, 0.81, 0.98, 0.6)  # Set the background to light blue
         # Ambient Light
@@ -351,7 +346,7 @@ class GameEngine(ShowBase):
     def toggle_gravity(self):
         self.physics_world.setGravity(next(self.acceleration_due_to_gravity))
     
-    def shoot_bullet(self, speed, radius, mass, color):
+    def shoot_bullet(self, speed: float, radius: float, mass: float, color: tuple[float, float, float, float]):
         # Use the camera's position and orientation to shoot the bullet
         position = self.camera.getPos()
         direction = self.camera.getQuat().getForward()  # Get the forward direction of the camera
@@ -366,7 +361,7 @@ class GameEngine(ShowBase):
     def shoot_big_bullet(self):
         return self.shoot_bullet(40, self.voxel_size, 20, (1, 0, 0, 1))
 
-    def create_bullet(self, position: Vec3, velocity: Vec3, radius: float, mass: float, color):
+    def create_bullet(self, position: Vec3, velocity: Vec3, radius: float, mass: float, color: tuple[float, float, float, float]) -> NodePath:
         # Bullet model
         bullet_model = self.loader.loadModel("models/misc/sphere.egg")  # Use a simple sphere model
         bullet_node = BulletRigidBodyNode('Bullet')
@@ -392,7 +387,7 @@ class GameEngine(ShowBase):
         return bullet_np
 
     @staticmethod
-    def create_geometry(vertices, indices, name="geom_node", debug=False):
+    def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node", debug: bool = False) -> NodePath:
         vdata = GeomVertexData('voxel_data', GameEngine.vertex_format_with_color(), Geom.UHStatic)
 
         vertex_writer = GeomVertexWriter(vdata, 'vertex')
@@ -425,11 +420,11 @@ class GameEngine(ShowBase):
         geom_node = GeomNode(name)
         geom_node.addGeom(geom)
 
-        geom_np = NodePath(geom_node)
-        return geom_np
+        return NodePath(geom_node)
+
     
     @staticmethod
-    def vertex_format_with_color():
+    def vertex_format_with_color() -> GeomVertexArrayFormat:
         # Define a vertex array format that includes position, normal, color, and texture
         array_format = GeomVertexArrayFormat()
         array_format.addColumn("vertex", 3, Geom.NTFloat32, Geom.CPoint)
@@ -444,7 +439,7 @@ class GameEngine(ShowBase):
 
         return vertex_format
 
-    def visualize_normals(self, geom_node, chunk_x, chunk_y, scale=0.5):
+    def visualize_normals(self, geom_node: NodePath, pos: Vec2, scale: float = 0.5):
         """
         Visualizes the normals of a geometry node, positioning them
         correctly based on the chunk's position in the world.
@@ -454,7 +449,7 @@ class GameEngine(ShowBase):
         - chunk_x, chunk_y: The chunk's position in the grid/map.
         - scale: The scale factor used for the visualization length of normals.
         """
-        chunk_world_x, chunk_world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
+        coordinates = WorldTools.calculate_world_chunk_coordinates(pos, self.chunk_size, self.voxel_size)
 
         lines_np = NodePath("normals_visualization")
         lines = LineSegs()
@@ -471,7 +466,7 @@ class GameEngine(ShowBase):
             n = normal_reader.getData3f()
 
             # Adjust local vertex position by chunk's world position
-            global_v = Vec3(local_v.getX() + chunk_world_x, local_v.getY() + chunk_world_y, local_v.getZ() + self.ground_height)
+            global_v = Vec3(local_v.getX() + pos.x, local_v.getY() + pos.y, local_v.getZ() + self.ground_height)
 
             # Calculate normal end point
             normal_end = global_v + n * scale
@@ -482,26 +477,30 @@ class GameEngine(ShowBase):
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
 
-    def apply_texture_and_physics_to_chunk(self, chunk_x, chunk_y, vertices, indices):
-        terrain_np = GameEngine.create_geometry(vertices, indices, debug=self.args.debug)
+    def apply_texture_and_physics_to_chunk(self, coordinates: tuple[int, int], voxel_world: VoxelWorld):
+        terrain_np = GameEngine.create_geometry(voxel_world.vertices, voxel_world.indices, debug=self.args.debug)
         terrain_np.reparentTo(self.render)
 
-        world_x, world_y = WorldTools.calculate_chunk_world_position(chunk_x, chunk_y, self.chunk_size, self.voxel_size)
-        terrain_np.setPos(world_x, world_y, self.ground_height)
+        world_pos = WorldTools.calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
+        terrain_np.setPos(world_pos.x, world_pos.y, self.ground_height)
 
         if self.args.debug:
             terrain_np.setLightOff()
         
         if self.args.normals:
-            self.visualize_normals(terrain_np, chunk_x, chunk_y)
+            self.visualize_normals(terrain_np, world_pos)
 
         # Position the flat terrain chunk according to its world coordinates
-        terrain_node = self.add_terrain_mesh_to_physics(vertices, indices, world_x, world_y)
+        terrain_node = self.add_terrain_mesh_to_physics(voxel_world, world_pos)
 
-        return terrain_np, terrain_node
+        voxel_world.terrain_np = terrain_np
+        voxel_world.terrain_node = terrain_node
     
-    def add_terrain_mesh_to_physics(self, vertices, indices, world_x, world_y):
+    def add_terrain_mesh_to_physics(self, voxel_world: VoxelWorld, pos: Vec2) -> BulletRigidBodyNode:
         terrainMesh = BulletTriangleMesh()
+
+        vertices = voxel_world.vertices
+        indices = voxel_world.indices
         
         # Loop through the indices to get triangles. Since vertices now include vertex_type
         for i in range(0, len(indices), 3):
@@ -521,7 +520,7 @@ class GameEngine(ShowBase):
         terrain_np = self.render.attachNewNode(terrain_node)
 
         # Set the position of the terrain's physics node to match its visual representation
-        terrain_np.setPos(world_x, world_y, self.ground_height)
+        terrain_np.setPos(pos.x, pos.y, self.ground_height)
 
         self.physics_world.attachRigidBody(terrain_node)
         return terrain_node
@@ -535,7 +534,7 @@ class GameEngine(ShowBase):
         self.crosshair.setTransparency(TransparencyAttrib.MAlpha)
         self.crosshair.setScale(0.05, 1, 0.05)
 
-    def update_physics(self, task):
+    def update_physics(self, task: Task) -> int:
         dt = globalClock.getDt()
         self.physics_world.doPhysics(dt)
 
@@ -546,13 +545,6 @@ class GameEngine(ShowBase):
             if result.getNumContacts() > 0:
                 print(f"Collision detected for {node.getName()}")
         '''
-        return Task.cont
-    
-    def update_terrain(self, task):
-        t0 = time.perf_counter()
-        self.chunk_manager.update_chunks()
-        dt = time.perf_counter() - t0
-        #print(f"Updated chunks in {dt}")
         return Task.cont
 
     def init_mouse_control(self):
@@ -565,7 +557,7 @@ class GameEngine(ShowBase):
         self.cameraPitch = 0
         self.cameraHeading = 0
     
-    def mouse_task(self, task):
+    def mouse_task(self, task: Task) -> int:
         if self.mouseWatcherNode.hasMouse():
             mouseX, mouseY = self.mouseWatcherNode.getMouseX(), self.mouseWatcherNode.getMouseY()
             
@@ -597,7 +589,7 @@ class GameEngine(ShowBase):
         self.fps_counter = OnscreenText(text="FPS: 0", pos=(-1.3, 0.9), scale=0.07,
                                         fg=(1, 1, 1, 1), align=TextNode.ALeft, mayChange=True)
 
-    def update_fps_counter(self, task):
+    def update_fps_counter(self, task: Task) -> int:
         """Updates the FPS counter with the current frame rate."""
         fps = round(globalClock.getAverageFrameRate(), 1)
         self.fps_counter.setText(f"FPS: {fps}")
@@ -618,7 +610,7 @@ class GameEngine(ShowBase):
         inputState.watchWithModifiers('rotateLeft', KeyboardButton.asciiKey('q'))
         inputState.watchWithModifiers('rotateRight', KeyboardButton.asciiKey('e'))
 
-    def move_camera_task(self, task):
+    def move_camera_task(self, task: Task) -> int:
         dt = globalClock.getDt()
         speed = 20  # Existing movement speed
         lift_speed = 10  # Existing up and down speed

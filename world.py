@@ -1,61 +1,300 @@
 import numpy as np
-from constants import VoxelType, voxel_type_map
+import noise
+import math
+
+from panda3d.core import Vec3, Vec2
+from panda3d.bullet import BulletClosestHitRayResult
+
+from constants import VoxelType, voxel_type_map, normals
+from voxel import VoxelTools, CoordinateTools
 
 class VoxelWorld:
 
-    def __init__(self, world_array, voxel_size):
+    def __init__(self, world_array: np.ndarray, voxel_size: int):
         self.voxel_size = voxel_size
         self.world_array = world_array
+
+        self.vertices = None
+        self.indices = None
+        self.terrain_np = None
+        self.terrain_node = None
         
-    def get_voxel_type(self, ix, iy, iz) -> VoxelType: 
+    def get_voxel_type(self, ix: int, iy: int, iz: int) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
         # and offset is half the size of the current array dimensions.
-        i, j, k = VoxelWorld.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = CoordinateTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         voxel_type_int = self.world_array[i, j, k]
         return voxel_type_map[voxel_type_int]
 
-    def set_voxel(self, ix, iy, iz, voxel_type: VoxelType):
-        i, j, k = VoxelWorld.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
+    def set_voxel(self, ix: int, iy: int, iz: int, voxel_type: VoxelType):
+        i, j, k = CoordinateTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         self.world_array[i, j, k] = voxel_type.value
+        return self
+
+    def create_world_mesh(self):
+        """Efficiently creates mesh data for exposed voxel faces.
+
+        Args:
+            voxel_world: 3D NumPy array representing voxel types.
+            voxel_size: The size of each voxel in world units.
+
+        Returns:
+            vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
+            indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
+        """
+
+        exposed_voxels = VoxelTools.identify_exposed_voxels(self.world_array)
+
+        vertices = []
+        indices = []
+        index_counter = 0  # Track indices for each exposed face
+
+        exposed_indices = np.argwhere(exposed_voxels)
+        
+        for i, j, k in exposed_indices:
+            ix, iy, iz = CoordinateTools.index_to_voxel_grid_coordinates(i, j, k, self.world_array.shape[0])
+            exposed_faces = VoxelTools.check_surrounding_air(self.world_array, i, j, k)
+
+            for face_name, normal in normals.items():
+                if face_name in exposed_faces:
+                    # Generate vertices for this face
+                    face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, self.voxel_size)
+                    face_normals = np.tile(np.array(normal), (4, 1))
+
+                    voxel_type = self.get_voxel_type(ix, iy, iz)
+
+                    # Append generated vertices, normals, and texture coordinates to the list
+                    for fv, fn in zip(face_vertices, face_normals):
+                        vertices.extend([*fv, *fn, voxel_type.value])
+                    
+                    # Create indices for two triangles making up the face
+                    indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
+                        index_counter + 2, index_counter + 3, index_counter])
+                    
+                    index_counter += 4
+
+        self.vertices = np.array(vertices, dtype=np.float32)
+        self.indices = np.array(indices, dtype=np.int32)
+   
+
+class WorldTools:
+
+    @staticmethod   
+    def get_center_of_hit_static_voxel2(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
+        """
+        Identifies the voxel hit by a raycast and returns its center position in world space.
+        
+        Parameters:
+        - raycast_result: The raycast object with a hit.
+        - voxel_size: The size of a voxel.
+        
+        Returns:
+        - Vec3: The center position of the hit voxel in world space.
+        """
+        hit_pos = raycast_result.getHitPos()
+        hit_normal = raycast_result.getHitNormal()
+
+        # Nudge the hit position slightly towards the opposite direction of the normal
+        # This helps ensure the hit position is always considered within the voxel, even near edges
+        nudge = hit_normal * (voxel_size * 0.015)  # Nudge by 1.5% of the voxel size towards the voxel center
+        adjusted_hit_pos = hit_pos - nudge
+
+        # Convert the adjusted hit position to voxel grid coordinates
+        grid_x = round(adjusted_hit_pos.x / voxel_size)
+        grid_y = round(adjusted_hit_pos.y / voxel_size)
+        grid_z = round(adjusted_hit_pos.z / voxel_size)
+
+        # Calculate the center of the voxel in world coordinates
+        voxel_center_x = grid_x * voxel_size
+        voxel_center_y = grid_y * voxel_size
+        voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
+
+        #if hit_normal == Vec3(0, 0, -1):
+        #    voxel_center_z += voxel_size
+
+        return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
+    
+    @staticmethod   
+    def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
+        """
+        Identifies the voxel hit by a raycast and returns its center position in world space.
+        
+        Parameters:
+        - raycast_result: The raycast object with a hit.
+        - voxel_size: The size of a voxel.
+        
+        Returns:
+        - Vec3: The center position of the hit voxel in world space.
+        """
+        hit_pos = raycast_result.getHitPos()
+        hit_normal = raycast_result.getHitNormal()
+
+        # Define a minimal bias to adjust hit positions near voxel boundaries
+        bias = voxel_size * 0.01  # 1% of the voxel size
+
+        # Apply bias based on the sign of the hit position components
+        biased_x = hit_pos.x + bias if hit_pos.x > 0 else hit_pos.x - bias
+        biased_y = hit_pos.y + bias if hit_pos.y > 0 else hit_pos.y - bias
+        biased_z = hit_pos.z + bias if hit_pos.z > 0 else hit_pos.z - bias
+
+        # Convert the biased hit position to voxel grid coordinates
+        grid_x = round(biased_x / voxel_size)
+        grid_y = round(biased_y / voxel_size)
+        grid_z = round(biased_z / voxel_size)
+
+        # Calculate the center of the voxel in world coordinates
+        voxel_center_x = grid_x * voxel_size
+        voxel_center_y = grid_y * voxel_size
+        voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
+
+        return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
     
     @staticmethod
-    def voxel_grid_coordinates_to_index(ix, iy, iz, n):
-        """
-        Convert world coordinates (ix, iy, iz) to array indices (i, j, k).
-        
-        Parameters:
-        - ix, iy, iz: World grid coordinates.
-        - n: Size of the voxel world in each dimension.
-        
-        Returns:
-        - i, j, k: Corresponding array indices.
-        """
-        offset = (n - 1) // 2
-        i = ix + offset
-        j = iy + offset
-        k = iz  # No change needed for z as it cannot be negative.
-        return i, j, k
+    def get_center_of_hit_dynamic_voxel(raycast_result: BulletClosestHitRayResult) -> Vec3:
+        hit_node = raycast_result.getNode()
+        hit_object = hit_node.getPythonTag("object")
+        ijk = hit_node.getPythonTag("ijk")
+
+        node_np = hit_object.node_paths[ijk]
+        return node_np.getPos()
+    
+    @staticmethod
+    def get_voxel_world(chunk_size: int, max_height: int, voxel_world_map: dict, coordinates: tuple[int, int], voxel_size: float) -> VoxelWorld:
+        if coordinates not in voxel_world_map:
+            width = chunk_size
+            depth = chunk_size
+            
+            # Initialize an empty voxel world with air (0)
+            world_array = np.zeros((width, depth, max_height), dtype=int)
+            
+            # Generate or retrieve heightmap for this chunk
+            heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
+            #heightmap = WorldTools.generate_perlin_height_map(chunk_size, pos)
+            
+            # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
+            height_levels = np.floor(heightmap).astype(int)
+            height_levels = np.clip(height_levels, 1, max_height)
+            adjusted_height_levels = height_levels[:-1, :-1]
+
+            # Create a 3D array representing each voxel's vertical index (Z-coordinate)
+            z_indices = np.arange(max_height).reshape(1, 1, max_height)
+
+            # Create a 3D boolean mask where true indicates a voxel should be set to rock (1)
+            mask = z_indices < adjusted_height_levels[:,:,np.newaxis]
+
+            # Apply the mask to the voxel world
+            world_array[mask] = 1
+
+            choices = (
+                VoxelType.STONE.value,
+                VoxelType.GRASS.value
+            )
+
+            world_array = np.where(world_array == 1, np.random.choice(choices, size=world_array.shape), world_array)
+
+            #world_array = np.zeros((5, 5, 5), dtype=int)
+            voxel_world = VoxelWorld(world_array, voxel_size)
+
+            '''    
+            if chunk_x == 0 and chunk_y == 0:
+                voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
+            voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
+            voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(1, 1, 0, VoxelType.STONE)
+            voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
+            '''
+
+
+            voxel_world_map[coordinates] = voxel_world
+            return voxel_world
+
+        return voxel_world_map.get(coordinates) 
 
     @staticmethod
-    def index_to_voxel_grid_coordinates(i, j, k, n):
+    def generate_perlin_height_map(chunk_size: int, chunk_pos: Vec2) -> np.ndarray:
+        scale = 0.06  # Adjust scale to control the "zoom" level of the noise
+        octaves = 6  # Number of layers of noise to combine
+        persistence = 0.5  # Amplitude of each octave
+        lacunarity = 1.5  # Frequency of each octave
+
+        height_map = np.zeros((chunk_size + 1, chunk_size + 1))
+
+        # Calculate global offsets
+        global_offset_x = chunk_pos.x * chunk_size
+        global_offset_y = chunk_pos.y * chunk_size
+
+        for x in range(chunk_size + 1):
+            for y in range(chunk_size + 1):
+                # Calculate global coordinates
+                global_x = (global_offset_x + x) * scale
+                global_y = (global_offset_y + y) * scale
+
+                # Generate height using Perlin noise
+                height = noise.pnoise2(global_x, global_y,
+                                    octaves=octaves,
+                                    persistence=persistence,
+                                    lacunarity=lacunarity,
+                                    repeatx=10000,  # Large repeat region to avoid repetition
+                                    repeaty=10000,
+                                    base=0)  # Base can be any constant, adjust for different terrains
+
+                # Map the noise value to a desired height range if needed
+                height_map[x, y] = height * 30
+
+        return height_map
+    
+    @staticmethod
+    def generate_flat_height_map(board_size: int, height: int=1) -> np.ndarray:
+        # Adjust board_size to account for the extra row and column for seamless edges
+        adjusted_size = board_size + 1
+        # Create a 2D NumPy array filled with the specified height value
+        return np.full((adjusted_size, adjusted_size), height)
+    
+    @staticmethod
+    def calculate_chunk_world_position(coordinates: tuple[int, int], chunk_size: int, voxel_size: float) -> Vec2:
         """
-        Convert array indices (i, j, k) back to world grid coordinates (ix, iy, iz).
-        
+        Calculates the world position of the chunk origo based on its grid coordinates.
+
         Parameters:
-        - i, j, k: Array indices.
-        - n: Size of the voxel world in each dimension.
-        
+        - coordinates: The chunk's coordinates in the grid/map.
+        - chunk_size: Number of voxels along a single axis of the chunk.
+        - voxel_size: Size of a voxel
+
         Returns:
-        - ix, iy, iz: Corresponding world coordinates.
+        Vec2: The world position of the chunk.
         """
-        offset = (n - 1) // 2
-        ix = i - offset
-        iy = j - offset
-        iz = k - 1 # No change needed for z as it cannot be negative.
-        
-        return ix, iy, iz
+        chunk_x, chunk_y = coordinates
+        x = chunk_x * chunk_size * voxel_size
+        y = chunk_y * chunk_size * voxel_size
+        return Vec2(x, y)
+    
+    @staticmethod
+    def calculate_world_chunk_coordinates(position: Vec2, chunk_size: int, voxel_size: float) -> tuple[int, int]:
+        """
+        Calculates the chunk grid coordinates corresponding to a world position.
 
-class WorldChunk:
+        Parameters:
+        - position: A Vec3 representing the world position.
+        - voxel_size: Size of a voxel.
+        - chunk_size: Number of voxels along a single axis of the chunk.
 
-    def __init__(self):
-        pass
+        Returns:    
+        Tuple[int, int]: The chunk's grid coordinates (chunk_x, chunk_y).
+        """
+        # Calculate the half-size of a chunk in world units
+        half_chunk_size_world_units = (chunk_size * voxel_size) / 2
+
+        # Adjust position to align chunk centers with the origin
+        adjusted_pos_x = position.x + half_chunk_size_world_units
+        adjusted_pos_y = position.y + half_chunk_size_world_units
+
+        # Calculate chunk coordinates
+        chunk_x = math.floor(adjusted_pos_x / (chunk_size * voxel_size)) if adjusted_pos_x >= 0 else math.ceil(adjusted_pos_x / (chunk_size * voxel_size)) - 1
+        chunk_y = math.floor(adjusted_pos_y / (chunk_size * voxel_size)) if adjusted_pos_y >= 0 else math.ceil(adjusted_pos_y / (chunk_size * voxel_size)) - 1
+
+        return chunk_x, chunk_y

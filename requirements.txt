@@ -4,3 +4,4 @@ pyautogui
 noise
 numpy
 scipy
+Pmw
