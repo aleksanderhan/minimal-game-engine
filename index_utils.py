@@ -2,12 +2,12 @@
 class IndexTools:
 
     @staticmethod
-    def voxel_grid_coordinates_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[str]:
+    def voxel_grid_coordinate_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[str]:
         """
-        Convert world grid coordinates (ix, iy, iz) to array indices (i, j, k).
+        Convert world grid coordinate (ix, iy, iz) to array indices (i, j, k).
         
         Parameters:
-        - ix, iy, iz: World grid coordinates.
+        - ix, iy, iz: World grid coordinate.
         - n: Size of the voxel world in each dimension.
         
         Returns:
@@ -20,16 +20,16 @@ class IndexTools:
         return i, j, k
 
     @staticmethod
-    def index_to_voxel_grid_coordinates(i: int, j: int, k: int , n: int) -> tuple[str]:
+    def index_to_voxel_grid_coordinate(i: int, j: int, k: int , n: int) -> tuple[str]:
         """
-        Convert array indices (i, j, k) back to world grid coordinates (ix, iy, iz).
+        Convert array indices (i, j, k) back to world grid coordinate (ix, iy, iz).
         
         Parameters:
         - i, j, k: Array indices.
         - n: Size of the voxel world in each dimension.
         
         Returns:
-        - ix, iy, iz: Corresponding world coordinates.
+        - ix, iy, iz: Corresponding world coordinate.
         """
         offset = (n - 1) // 2
         ix = i - offset

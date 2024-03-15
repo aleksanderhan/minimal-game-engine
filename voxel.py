@@ -12,7 +12,7 @@ from panda3d.core import TransformState, NodePath
 
 
 from constants import offset_arrays, normals, material_properties, VoxelType, voxel_type_map
-from misc_utils import IndexTools
+from index_utils import IndexTools
 
 # Toggle generator. Returns a or b alternatingly on next()
 def toggle(a, b, yield_a=True):
@@ -75,7 +75,7 @@ class DynamicArbitraryVoxelObject:
         body_indices = np.argwhere(self.voxel_array)
         parts = []
         for i, j, k in body_indices:
-            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinates(i, j, k, self.voxel_array.shape[0])
+            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinate(i, j, k, self.voxel_array.shape[0])
 
             position = root_node_pos
 
@@ -170,7 +170,7 @@ class VoxelTools:
             face_vertices = VoxelTools.generate_face_vertices(0, 0, 0, face_name, voxel_size)
             face_normals = np.tile(np.array(normal), (4, 1))
 
-            # Append generated vertices, normals, and texture coordinates to the list
+            # Append generated vertices, normals, and texture coordinate to the list
             for fv, fn in zip(face_vertices, face_normals):
                 vertices.extend([*fv, *fn, voxel_type.value])
             
@@ -194,7 +194,7 @@ class VoxelTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            ix, iy, iz = CoordinateTools.index_to_voxel_grid_coordinates(i, j, k, object.voxel_array.shape[0])
+            ix, iy, iz = CoordinateTools.index_to_voxel_grid_coordinate(i, j, k, object.voxel_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(object.voxel_array, i, j, k)
 
             c = 0
@@ -240,7 +240,7 @@ class VoxelTools:
         Generates vertices and normals for a given voxel face.
 
         Args:
-            ix, iy, iz: Coordinates of the voxel in the voxel grid.
+            ix, iy, iz: coordinate of the voxel in the voxel grid.
             face_name: The face to be generated
             voxel_size: Size of the voxel.
 
@@ -249,7 +249,7 @@ class VoxelTools:
         """
         face_offsets = offset_arrays[face_name]   
 
-        # Calculate the center position of the voxel in world coordinates
+        # Calculate the center position of the voxel in world coordinate
         center_position = np.array([ix, iy, iz]) * voxel_size
 
         # Then, for each face, adjust the vertices based on this center position
