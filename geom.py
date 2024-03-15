@@ -1,4 +1,5 @@
 import numpy as np
+from functools import lru_cache
 
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
@@ -44,6 +45,7 @@ class GeometryTools:
 
         return NodePath(geom_node)
     
+    @lru_cache
     @staticmethod
     def vertex_format_with_color() -> GeomVertexArrayFormat:
         # Define a vertex array format that includes position, normal, color, and texture

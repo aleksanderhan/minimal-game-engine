@@ -1,13 +1,14 @@
 import numpy as np
 import noise
 import math
+from functools import lru_cache
 
 from panda3d.core import Vec3, Vec2
 from panda3d.bullet import BulletClosestHitRayResult
 
 from constants import VoxelType, voxel_type_map, normals
 from voxel import VoxelTools
-from index_utils import IndexTools
+from misc_utils import IndexTools
 
 class VoxelWorld:
 
@@ -78,6 +79,12 @@ class VoxelWorld:
    
 
 class WorldTools:
+
+    @staticmethod
+    def calculate_distance_between_2d_points(player_coords: tuple[int, int] | Vec2, coordinate: tuple[int, int] | Vec2) -> float:
+        player_chunk_x, player_chunk_y = player_coords
+        x, y = coordinate
+        return ((x - player_chunk_x)**2 + (y - player_chunk_y)**2)**0.5
 
     @staticmethod   
     def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:

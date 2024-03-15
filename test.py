@@ -193,25 +193,6 @@ class ReprioritizationQueue:
             _, _, wrapper = heapq.heappop(self.queue)
             return wrapper.task
 
-    def batch_change_priority0(self, wrapped_tasks: list[TaskWrapper]):
-        with self.lock:
-            # Temporarily store modified wrappers to re-add them after modifications
-            temp_wrappers = []
-            
-            # Find and adjust the priority of the task
-            for _, counter, wrapper in self.queue:
-                for reprioritized_wrapper in wrapped_tasks:
-                    if wrapper.task == reprioritized_wrapper.task:
-                        # Update the wrapper priority and store it for re-adding
-                        temp_wrappers.append((reprioritized_wrapper.priority, reprioritized_wrapper))
-            
-            # If we found and adjusted any wrappers, rebuild the heap
-            if temp_wrappers:
-                # Remove the old entry and add the updated one
-                self.queue = [(priority, counter, wrapper) for priority, counter, wrapper in self.queue if wrapper.task != reprioritized_wrapper.task]
-                for priority, wrapper in temp_wrappers:
-                    heapq.heappush(self.queue, (priority, counter, wrapper))
-
     def batch_change_priority1(self, wrapped_tasks: list[TaskWrapper]):
         with self.lock:
             # Create a mapping from task to new priority for quick lookup
@@ -248,6 +229,20 @@ class ReprioritizationQueue:
             self.queue = new_queue
             heapq.heapify(self.queue)  # Re-establish heap order
 
+    def batch_change_priority3(self, wrapped_tasks: list[TaskWrapper]):
+        with self.lock:
+            # Create a mapping from task to new priority for quick lookup
+            new_priorities = {wrapper.task: wrapper.priority for wrapper in wrapped_tasks}
+
+            # Iterate over the queue and update priorities based on new_priorities
+            for i, (_, counter, wrapper) in enumerate(self.queue):
+                if wrapper.task in new_priorities:
+                    # Update priority directly in the queue
+                    self.queue[i] = (new_priorities[wrapper.task], counter, wrapper)
+
+            # After updating the priorities in the queue, re-heapify to maintain the heap invariant
+            heapq.heapify(self.queue)
+
 
 
 
@@ -261,36 +256,17 @@ queue.put((2, 2), 2)
 queue.put((3, 3), 3)
 queue.put((4, 4), 4)
 queue.put((5, 5), 5)
+queue.put((0, 0), 0)
 
-change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
-queue.batch_change_priority0(change_priority)
-task0 = queue.get()
-print("task0", task0)
-task1 = queue.get()
-print("task1", task1)
-task2 = queue.get()
-print("task2", task2)
-dt = time.perf_counter() - t0
-print(dt)
-print()
-
-t0 = time.perf_counter()
-queue = ReprioritizationQueue()
-
-queue.put((1, 1), 1)
-queue.put((2, 2), 2)
-queue.put((3, 3), 3)
-queue.put((4, 4), 4)
-queue.put((5, 5), 5)
 
 change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
 queue.batch_change_priority1(change_priority)
-task0 = queue.get()
-print("task0", task0)
-task1 = queue.get()
-print("task1", task1)
-task2 = queue.get()
-print("task2", task2)
+first = queue.get()
+print("first", first)
+second = queue.get()
+print("second", second)
+third = queue.get()
+print("third", third)
 dt = time.perf_counter() - t0
 print(dt)
 print()
@@ -303,15 +279,40 @@ queue.put((2, 2), 2)
 queue.put((3, 3), 3)
 queue.put((4, 4), 4)
 queue.put((5, 5), 5)
+queue.put((0, 0), 0)
+
 
 change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
 queue.batch_change_priority2(change_priority)
-task0 = queue.get()
-print("task0", task0)
-task1 = queue.get()
-print("task1", task1)
-task2 = queue.get()
-print("task2", task2)
+first = queue.get()
+print("first", first)
+second = queue.get()
+print("second", second)
+third = queue.get()
+print("third", third)
+dt = time.perf_counter() - t0
+print(dt)
+print()
+
+t0 = time.perf_counter()
+queue = ReprioritizationQueue()
+
+queue.put((1, 1), 1)
+queue.put((2, 2), 2)
+queue.put((3, 3), 3)
+queue.put((4, 4), 4)
+queue.put((5, 5), 5)
+queue.put((0, 0), 0)
+
+
+change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
+queue.batch_change_priority3(change_priority)
+first = queue.get()
+print("first", first)
+second = queue.get()
+print("second", second)
+third = queue.get()
+print("third", third)
 dt = time.perf_counter() - t0
 print(dt)
 print()

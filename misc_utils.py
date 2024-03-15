@@ -1,6 +1,16 @@
+from functools import lru_cache
+
+
+# Toggle generator. Returns a or b alternatingly on next()
+def toggle(a, b, yield_a=True):
+    while True:
+        (yield a) if yield_a else (yield b)
+        yield_a = not yield_a
+
 
 class IndexTools:
 
+    @lru_cache
     @staticmethod
     def voxel_grid_coordinate_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[str]:
         """
@@ -19,6 +29,7 @@ class IndexTools:
         k = iz  # No change needed for z as it cannot be negative.
         return i, j, k
 
+    @lru_cache
     @staticmethod
     def index_to_voxel_grid_coordinate(i: int, j: int, k: int , n: int) -> tuple[str]:
         """

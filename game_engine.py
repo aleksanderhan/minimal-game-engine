@@ -32,10 +32,11 @@ from panda3d.core import TransparencyAttrib, Material, VBase4
 from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
-from voxel import toggle, VoxelTools, DynamicArbitraryVoxelObject
+from voxel import VoxelTools, DynamicArbitraryVoxelObject
 from constants import VoxelType, material_properties, voxel_type_map
 from world import VoxelWorld, WorldTools
 from geom import GeometryTools
+from misc_utils import toggle
 
 
 random.seed(1337)

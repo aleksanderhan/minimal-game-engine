@@ -1,24 +1,14 @@
 import numpy as np
 import uuid
+from functools import lru_cache
 
-from panda3d.bullet import (
-    BulletRigidBodyNode, BulletSphereShape
-)
-from panda3d.core import (
-    Vec3, LQuaternionf
-)
+from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape
+from panda3d.core import Vec3, LQuaternionf
 from panda3d.bullet import BulletGenericConstraint, BulletRigidBodyNode
 from panda3d.core import TransformState, NodePath
 
-
 from constants import offset_arrays, normals, material_properties, VoxelType, voxel_type_map
-from index_utils import IndexTools
-
-# Toggle generator. Returns a or b alternatingly on next()
-def toggle(a, b, yield_a=True):
-    while True:
-        (yield a) if yield_a else (yield b)
-        yield_a = not yield_a
+from misc_utils import IndexTools
 
 
 class DynamicArbitraryVoxelObject:
@@ -140,6 +130,7 @@ class VoxelTools:
 
     @staticmethod
     def create_dynamic_single_voxel_physics_node(object: DynamicArbitraryVoxelObject, render, physics_world) -> NodePath:
+        print(type(render), type(physics_world)) # to add types hints
         voxel_type_value = object.voxel_array[0, 0, 0]
         voxel_type = voxel_type_map[voxel_type_value]
         material = material_properties[voxel_type]
@@ -158,6 +149,7 @@ class VoxelTools:
         physics_world.attachRigidBody(node)
         return node_np
     
+    @lru_cache
     @staticmethod
     def create_single_voxel_mesh(voxel_type: VoxelType, voxel_size: int) -> tuple[np.ndarray, np.ndarray]:
         vertices = []
@@ -194,7 +186,7 @@ class VoxelTools:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            ix, iy, iz = CoordinateTools.index_to_voxel_grid_coordinate(i, j, k, object.voxel_array.shape[0])
+            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinate(i, j, k, object.voxel_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(object.voxel_array, i, j, k)
 
             c = 0
@@ -234,6 +226,7 @@ class VoxelTools:
         
         return exposed_faces
     
+    @lru_cache
     @staticmethod
     def generate_face_vertices(ix: int, iy: int, iz: int, face_name: str, voxel_size: int):
         """
