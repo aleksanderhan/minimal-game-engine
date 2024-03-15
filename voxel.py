@@ -12,7 +12,7 @@ from panda3d.core import TransformState, NodePath
 
 
 from constants import offset_arrays, normals, material_properties, VoxelType, voxel_type_map
-from coordinate_utils import CoordinateTools
+from misc_utils import IndexTools
 
 # Toggle generator. Returns a or b alternatingly on next()
 def toggle(a, b, yield_a=True):
@@ -75,7 +75,7 @@ class DynamicArbitraryVoxelObject:
         body_indices = np.argwhere(self.voxel_array)
         parts = []
         for i, j, k in body_indices:
-            ix, iy, iz = CoordinateTools.index_to_voxel_grid_coordinates(i, j, k, self.voxel_array.shape[0])
+            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinates(i, j, k, self.voxel_array.shape[0])
 
             position = root_node_pos
 

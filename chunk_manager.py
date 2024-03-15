@@ -85,8 +85,8 @@ class ChunkManager:
         return result
     
     def load_chunk(self, coordinates: tuple[int, int], voxel_world: VoxelWorld):
-        print("coordinates", coordinates)
-        print("voxel_world", voxel_world)
+        print("chunk coordinates", coordinates)
+        print("world_array", voxel_world.world_array)
         self.game_engine.apply_texture_and_physics_to_chunk(coordinates, voxel_world)
         self.loaded_chunks[coordinates] = voxel_world
 

@@ -1,5 +1,5 @@
 
-class CoordinateTools:
+class IndexTools:
 
     @staticmethod
     def voxel_grid_coordinates_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[str]:

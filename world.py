@@ -6,7 +6,8 @@ from panda3d.core import Vec3, Vec2
 from panda3d.bullet import BulletClosestHitRayResult
 
 from constants import VoxelType, voxel_type_map, normals
-from voxel import VoxelTools, CoordinateTools
+from voxel import VoxelTools
+from misc_utils import IndexTools
 
 class VoxelWorld:
 
@@ -22,14 +23,13 @@ class VoxelWorld:
     def get_voxel_type(self, ix: int, iy: int, iz: int) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
         # and offset is half the size of the current array dimensions.
-        i, j, k = CoordinateTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = IndexTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         voxel_type_int = self.world_array[i, j, k]
         return voxel_type_map[voxel_type_int]
 
     def set_voxel(self, ix: int, iy: int, iz: int, voxel_type: VoxelType):
-        i, j, k = CoordinateTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = IndexTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         self.world_array[i, j, k] = voxel_type.value
-        return self
 
     def create_world_mesh(self):
         """Efficiently creates mesh data for exposed voxel faces.
@@ -52,7 +52,7 @@ class VoxelWorld:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            ix, iy, iz = CoordinateTools.index_to_voxel_grid_coordinates(i, j, k, self.world_array.shape[0])
+            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinates(i, j, k, self.world_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(self.world_array, i, j, k)
 
             for face_name, normal in normals.items():
@@ -80,7 +80,7 @@ class VoxelWorld:
 class WorldTools:
 
     @staticmethod   
-    def get_center_of_hit_static_voxel2(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
+    def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
         """
         Identifies the voxel hit by a raycast and returns its center position in world space.
         
@@ -111,41 +111,6 @@ class WorldTools:
 
         #if hit_normal == Vec3(0, 0, -1):
         #    voxel_center_z += voxel_size
-
-        return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
-    
-    @staticmethod   
-    def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
-        """
-        Identifies the voxel hit by a raycast and returns its center position in world space.
-        
-        Parameters:
-        - raycast_result: The raycast object with a hit.
-        - voxel_size: The size of a voxel.
-        
-        Returns:
-        - Vec3: The center position of the hit voxel in world space.
-        """
-        hit_pos = raycast_result.getHitPos()
-        hit_normal = raycast_result.getHitNormal()
-
-        # Define a minimal bias to adjust hit positions near voxel boundaries
-        bias = voxel_size * 0.01  # 1% of the voxel size
-
-        # Apply bias based on the sign of the hit position components
-        biased_x = hit_pos.x + bias if hit_pos.x > 0 else hit_pos.x - bias
-        biased_y = hit_pos.y + bias if hit_pos.y > 0 else hit_pos.y - bias
-        biased_z = hit_pos.z + bias if hit_pos.z > 0 else hit_pos.z - bias
-
-        # Convert the biased hit position to voxel grid coordinates
-        grid_x = round(biased_x / voxel_size)
-        grid_y = round(biased_y / voxel_size)
-        grid_z = round(biased_z / voxel_size)
-
-        # Calculate the center of the voxel in world coordinates
-        voxel_center_x = grid_x * voxel_size
-        voxel_center_y = grid_y * voxel_size
-        voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
 
         return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
     
@@ -192,11 +157,11 @@ class WorldTools:
 
             world_array = np.where(world_array == 1, np.random.choice(choices, size=world_array.shape), world_array)
 
-            #world_array = np.zeros((5, 5, 5), dtype=int)
+            world_array = np.zeros((5, 5, 5), dtype=int)
             voxel_world = VoxelWorld(world_array, voxel_size)
 
-            '''    
-            if chunk_x == 0 and chunk_y == 0:
+            #'''    
+            if coordinates == (0, 0):
                 voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
             voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
             voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
@@ -207,7 +172,7 @@ class WorldTools:
             voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
             voxel_world.set_voxel(1, 1, 0, VoxelType.STONE)
             voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
-            '''
+            #'''
 
 
             voxel_world_map[coordinates] = voxel_world
