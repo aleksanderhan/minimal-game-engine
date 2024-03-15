@@ -91,7 +91,7 @@ class GameEngine(ShowBase):
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 3
+        n = 25
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -102,7 +102,7 @@ class GameEngine(ShowBase):
         self.placeholder_cube = None
         self.spawn_distance = 10
 
-        self.camera.setPos(0, 0, 100)
+        self.camera.setPos(0, 0, 75)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
