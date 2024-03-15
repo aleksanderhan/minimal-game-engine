@@ -85,14 +85,13 @@ class ChunkManager:
     
     def get_number_of_loaded_vertices(self) -> int:
         result = 0
-        for voxel_world in self.loaded_chunks.values():
+        for voxel_world in list(self.loaded_chunks.values()):
             result += len(voxel_world.vertices)
         return result
     
     def get_number_of_visible_voxels(self) -> int:
         result = 0
-        for coordinate, world in self.loaded_chunks.items():
-            world = self.loaded_chunks.get(coordinate)
+        for world in list(self.loaded_chunks.values()):
             exposed_voxels = VoxelTools.identify_exposed_voxels(world.world_array)
             result += np.count_nonzero(exposed_voxels)
         return result
@@ -119,12 +118,13 @@ class ChunkManager:
         print('Worker error:', exc)
     
     def _load_closest_chunks(self, task: Task) -> int:
-        coordinate = self.load_queue.get()
-        if coordinate is not None:
-            distance_from_player = self.get_player_distance_from_coordinate(coordinate)
-            if distance_from_player <= self.chunk_radius:
-                params = (coordinate, self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_size, self.loaded_chunks)
-                self.pool.apply_async(ChunkManager._worker, params, callback=self._callback, error_callback=self._error_callback)
+        for _ in range(self.num_workers):
+            coordinate = self.load_queue.get()
+            if coordinate is not None:
+                distance_from_player = self.get_player_distance_from_coordinate(coordinate)
+                if distance_from_player <= self.chunk_radius:
+                    params = (coordinate, self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_size, self.loaded_chunks)
+                    self.pool.apply_async(ChunkManager._worker, params, callback=self._callback, error_callback=self._error_callback)
 
         return Task.cont        
     
