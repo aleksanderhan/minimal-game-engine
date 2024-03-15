@@ -243,7 +243,6 @@ class GameEngine(ShowBase):
 
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType = VoxelType.STONE):
         coordinates = WorldTools.calculate_world_chunk_coordinates(position, self.chunk_size, self.voxel_size)
-        print("chunk coordinates", coordinates)
         voxel_world = self.chunk_manager.get_voxel_world(coordinates)
 
         center_chunk_pos = WorldTools.calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
@@ -251,10 +250,6 @@ class GameEngine(ShowBase):
         iy = int((position.y - center_chunk_pos.y) / self.voxel_size)
         iz = int((position.z + self.voxel_size) / self.voxel_size)
         
-
-
-        print("creating static voxel, position:", position, "ix, iy, iz", ix, iy, iz)
-        print("center_chunk_pos", center_chunk_pos)
         try:
             # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(ix, iy, iz, voxel_type)

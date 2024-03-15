@@ -60,7 +60,7 @@ class ChunkManager:
         self.unload_queue = ReprioritizationQueue()
         self.chunks_loading = set()
 
-        self.chunk_radius = 3 #12
+        self.chunk_radius = 12
         self.num_chunks = int(3.14*self.chunk_radius**2)
 
         self.game_engine.taskMgr.add(self._identify_chunks_to_load_and_unload, "IdentifyChunksToLoadAndUnload")
@@ -85,10 +85,8 @@ class ChunkManager:
         return result
     
     def load_chunk(self, coordinates: tuple[int, int], voxel_world: VoxelWorld):
-        print("chunk coordinates", coordinates)
-        print("world_array", voxel_world.world_array)
-        self.game_engine.apply_texture_and_physics_to_chunk(coordinates, voxel_world)
         self.loaded_chunks[coordinates] = voxel_world
+        self.game_engine.apply_texture_and_physics_to_chunk(coordinates, voxel_world)
 
     def get_player_chunk_coordinates(self) -> tuple[int, int]:
         player_pos = self.game_engine.camera.getPos()
@@ -129,7 +127,6 @@ class ChunkManager:
         return coordinates, voxel_world
 
     def _identify_chunks_to_load_and_unload(self, task: Task) -> Task:
-        #print("identify_chunks_to_load")
         player_chunk_x, player_chunk_y = self.get_player_chunk_coordinates()
 
         # Iterate through all possible chunk coordinates around the player within the chunk_radius.
@@ -141,17 +138,17 @@ class ChunkManager:
                 
                 # Check if the chunk is within the specified radius and not already loaded.
                 coordinates = (x, y)
-                if distance_from_player <= self.chunk_radius and coordinates not in self.loaded_chunks:
+                if distance_from_player <= self.chunk_radius and coordinates not in self.loaded_chunks and coordinates not in self.chunks_loading:
                     # If the chunk meets the criteria, add it to the list of chunks to load.
                     #print("chunk to be loaded", "x, y", x, y, "distance_from_player", distance_from_player)
                     self.chunks_loading.add(coordinates)
                     self.load_queue.put(coordinates, distance_from_player)
 
-        for coordinates in self.loaded_chunks.keys():
+        for coordinates in list(self.loaded_chunks.keys()):
             x, y = coordinates
             distance_from_player = ((x - player_chunk_x)**2 + (y - player_chunk_y)**2)**0.5
 
-            if distance_from_player > self.chunk_radius:
+            if distance_from_player > self.chunk_radius and coordinates not in self.chunks_loading:
                 self.unload_queue.put(coordinates, -distance_from_player)
 
         return Task.cont
@@ -163,7 +160,6 @@ class ChunkManager:
         return Task.cont
 
     def _unload_chunk(self, coordinates: tuple[int, int]):
-        print("unload", coordinates)
         voxel_world = self.loaded_chunks.pop(coordinates, None)
         if voxel_world:
             voxel_world.terrain_np.removeNode()
