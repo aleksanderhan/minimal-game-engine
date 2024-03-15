@@ -14,8 +14,7 @@ from direct.gui.OnscreenText import OnscreenText
 from direct.gui.OnscreenImage import OnscreenImage
 
 from panda3d.core import (
-    AmbientLight, DirectionalLight, Geom, GeomNode, GeomTriangles,
-    GeomVertexData, GeomVertexFormat, GeomVertexWriter, KeyboardButton,
+    AmbientLight, DirectionalLight, KeyboardButton,
     LineSegs, Material, TextNode, WindowProperties,
     loadPrcFileData, GeomVertexReader, LQuaternionf
 )
@@ -28,8 +27,7 @@ from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, 
 from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
 from panda3d.core import WindowProperties
-from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
-from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
+from panda3d.core import NodePath
 from panda3d.core import TransparencyAttrib, Material, VBase4
 from panda3d.core import Thread
 
@@ -37,6 +35,7 @@ from chunk_manager import ChunkManager
 from voxel import toggle, VoxelTools, DynamicArbitraryVoxelObject
 from constants import VoxelType, material_properties, voxel_type_map
 from world import VoxelWorld, WorldTools
+from geom import GeometryTools
 
 
 random.seed(1337)
@@ -57,7 +56,7 @@ class ObjectManager:
         self.objects[object.id] = object
         root_node_path = object.node_paths[(0, 0, 0)]
 
-        geom_np = GameEngine.create_geometry(object.vertices, object.indices, debug=self.game_engine.args.debug)
+        geom_np = GeometryTools.create_geometry(object.vertices, object.indices, debug=self.game_engine.args.debug)
         geom_np.reparentTo(self.game_engine.render)
         geom_np.reparentTo(root_node_path)
 
@@ -91,7 +90,7 @@ class GameEngine(ShowBase):
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 25
+        n = 16
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -102,7 +101,7 @@ class GameEngine(ShowBase):
         self.placeholder_cube = None
         self.spawn_distance = 10
 
-        self.camera.setPos(0, 0, 75)
+        self.camera.setPos(0, 0, 100)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
@@ -125,6 +124,8 @@ class GameEngine(ShowBase):
         self.accept('g', self.toggle_gravity)
         self.accept('b', self.toggle_build_mode)
         self.accept('i', self.print_world_info)
+        self.accept('t', self.chunk_manager._identify_chunks_to_load_and_unload)
+
 
     def setup_environment(self):
         #build_robot(self.physics_world)
@@ -133,7 +134,9 @@ class GameEngine(ShowBase):
     def print_world_info(self):
         num_vertices = self.chunk_manager.get_number_of_loaded_vertices()
         num_surface_voxels = self.chunk_manager.get_number_of_visible_voxels()
+        num_chunks_loaded = len(list(self.chunk_manager.loaded_chunks))
         print("--- World info ---")
+        print("Number of loaded chunks", num_chunks_loaded)
         print("Number of vertices:", num_vertices)
         print("Number of surface voxels:", num_surface_voxels)
 
@@ -193,7 +196,7 @@ class GameEngine(ShowBase):
 
     def create_translucent_voxel(self, position: Vec3):
         vertices, indices = VoxelTools.create_single_voxel_mesh(VoxelType.AIR, self.voxel_size)
-        cube = GameEngine.create_geometry(vertices, indices, debug=self.args.debug)
+        cube = GeometryTools.create_geometry(vertices, indices, debug=self.args.debug)
         
         # Set the cube's scale and position
         #cube.setScale(self.voxel_size) # scale != voxel_size
@@ -384,59 +387,6 @@ class GameEngine(ShowBase):
         
         return bullet_np
 
-    @staticmethod
-    def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node", debug: bool = False) -> NodePath:
-        vdata = GeomVertexData('voxel_data', GameEngine.vertex_format_with_color(), Geom.UHStatic)
-
-        vertex_writer = GeomVertexWriter(vdata, 'vertex')
-        normal_writer = GeomVertexWriter(vdata, 'normal')
-        color_writer = GeomVertexWriter(vdata, 'color')
-
-        for i in range(0, len(vertices), 7):  # 7 components per vertex: 3 position, 3 normal, 1 voxel_type
-            vertex_writer.addData3f(vertices[i], vertices[i+1], vertices[i+2])
-            normal_writer.addData3f(vertices[i+3], vertices[i+4], vertices[i+5])
-
-            if debug:
-                dx, dy, dz = vertices[i+3], vertices[i+4], vertices[i+5]
-                color = (dx, dy, dz, 0.8) #color_normal_map[(dx, dy, dz)]
-            else:
-                voxel_type_value = int(vertices[i+6])
-                voxel_type = voxel_type_map[voxel_type_value]
-                color = material_properties[voxel_type]["color"]
-            #print(color)
-            color_writer.addData4f(color)
-
-        # Create triangles using indices
-        tris = GeomTriangles(Geom.UHStatic)
-        for i in range(0, len(indices), 3):
-            tris.addVertices(indices[i], indices[i+1], indices[i+2])
-        tris.closePrimitive()
-
-        geom = Geom(vdata)
-        geom.addPrimitive(tris)
-
-        geom_node = GeomNode(name)
-        geom_node.addGeom(geom)
-
-        return NodePath(geom_node)
-
-    
-    @staticmethod
-    def vertex_format_with_color() -> GeomVertexArrayFormat:
-        # Define a vertex array format that includes position, normal, color, and texture
-        array_format = GeomVertexArrayFormat()
-        array_format.addColumn("vertex", 3, Geom.NTFloat32, Geom.CPoint)
-        array_format.addColumn("normal", 3, Geom.NTFloat32, Geom.CVector)
-        array_format.addColumn("color", 4, Geom.NTFloat32, Geom.CColor)
-        array_format.addColumn("texcoord", 2, Geom.NTFloat32, Geom.CTexcoord)
-
-        # Create a vertex format based on the array format
-        vertex_format = GeomVertexFormat()
-        vertex_format.addArray(array_format)
-        vertex_format = GeomVertexFormat.registerFormat(vertex_format)
-
-        return vertex_format
-
     def visualize_normals(self, geom_node: NodePath, pos: Vec2, scale: float = 0.5):
         """
         Visualizes the normals of a geometry node, positioning them
@@ -476,7 +426,7 @@ class GameEngine(ShowBase):
         lines_np.reparentTo(self.render)
 
     def apply_texture_and_physics_to_chunk(self, coordinate: tuple[int, int], voxel_world: VoxelWorld):
-        terrain_np = GameEngine.create_geometry(voxel_world.vertices, voxel_world.indices, debug=self.args.debug)
+        terrain_np = voxel_world.terrain_np
         terrain_np.reparentTo(self.render)
 
         world_pos = WorldTools.calculate_chunk_world_position(coordinate, self.chunk_size, self.voxel_size)
