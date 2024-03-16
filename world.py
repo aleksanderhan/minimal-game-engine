@@ -3,8 +3,8 @@ import noise
 import math
 from functools import lru_cache
 
-from panda3d.core import Vec3, Vec2
-from panda3d.bullet import BulletClosestHitRayResult
+from panda3d.core import Vec3, Vec2, NodePath
+from panda3d.bullet import BulletClosestHitRayResult, BulletRigidBodyNode
 
 from constants import VoxelType, voxel_type_map, normals
 from voxel import VoxelTools
@@ -13,13 +13,23 @@ from misc_utils import IndexTools
 class VoxelWorld:
 
     def __init__(self, world_array: np.ndarray, voxel_size: int):
+
         self.voxel_size = voxel_size
         self.world_array = world_array
+        
+        self.chunk_coord: tuple[int, int] = None
+        self.vertices: np.ndarray = None
+        self.indices: np.ndarray = None
+        self.terrain_np: NodePath = None
+        self.terrain_node: BulletRigidBodyNode = None
 
-        self.vertices = None
-        self.indices = None
-        self.terrain_np = None
-        self.terrain_node = None
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VoxelWorld):
+            return np.array_equal(self.world_array, other.world_array) and self.chunk_coord == other.chunk_coord
+        return False
+    
+    def __hash__(self):
+        return hash((self.chunk_coord, self.world_array))
         
     def get_voxel_type(self, ix: int, iy: int, iz: int) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
@@ -76,15 +86,17 @@ class VoxelWorld:
 
         self.vertices = np.array(vertices, dtype=np.float32)
         self.indices = np.array(indices, dtype=np.int32)
+
    
 
 class WorldTools:
 
     @staticmethod
-    def calculate_distance_between_2d_points(player_coords: tuple[int, int] | Vec2, coordinate: tuple[int, int] | Vec2) -> float:
-        player_chunk_x, player_chunk_y = player_coords
-        x, y = coordinate
-        return ((x - player_chunk_x)**2 + (y - player_chunk_y)**2)**0.5
+    @lru_cache
+    def calculate_distance_between_2d_points(point1: tuple[int, int] | Vec2, point2: tuple[int, int] | Vec2) -> float:
+        point1_x, point1_y = point1
+        point2_x, point2_y = point2
+        return ((point2_x - point1_x)**2 + (point2_y - point1_y)**2)**0.5
 
     @staticmethod   
     def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
@@ -131,61 +143,57 @@ class WorldTools:
         return node_np.getPos()
     
     @staticmethod
-    def get_or_create_voxel_world(chunk_size: int, max_height: int, voxel_world_map: dict, coordinate: tuple[int, int], voxel_size: float) -> VoxelWorld:
-        if coordinate not in voxel_world_map:
-            width = chunk_size
-            depth = chunk_size
-            
-            # Initialize an empty voxel world with air (0)
-            world_array = np.zeros((width, depth, max_height), dtype=int)
-            
-            # Generate or retrieve heightmap for this chunk
-            #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
-            heightmap = WorldTools.generate_perlin_height_map(chunk_size, coordinate)
-            
-            # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
-            height_levels = np.floor(heightmap).astype(int)
-            height_levels = np.clip(height_levels, 1, max_height)
-            adjusted_height_levels = height_levels[:-1, :-1]
+    def create_voxel_world(chunk_size: int, max_height: int, coordinate: tuple[int, int], voxel_size: float) -> VoxelWorld:
+        width = chunk_size
+        depth = chunk_size
+        
+        # Initialize an empty voxel world with air (0)
+        world_array = np.zeros((width, depth, max_height), dtype=int)
+        
+        # Generate or retrieve heightmap for this chunk
+        #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
+        heightmap = WorldTools.generate_perlin_height_map(chunk_size, coordinate)
+        
+        # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
+        height_levels = np.floor(heightmap).astype(int)
+        height_levels = np.clip(height_levels, 1, max_height)
+        adjusted_height_levels = height_levels[:-1, :-1]
 
-            # Create a 3D array representing each voxel's vertical index (Z-coordinate)
-            z_indices = np.arange(max_height).reshape(1, 1, max_height)
+        # Create a 3D array representing each voxel's vertical index (Z-coordinate)
+        z_indices = np.arange(max_height).reshape(1, 1, max_height)
 
-            # Create a 3D boolean mask where true indicates a voxel should be set to rock (1)
-            mask = z_indices < adjusted_height_levels[:,:,np.newaxis]
+        # Create a 3D boolean mask where true indicates a voxel should be set to rock (1)
+        mask = z_indices < adjusted_height_levels[:,:,np.newaxis]
 
-            # Apply the mask to the voxel world
-            world_array[mask] = 1
+        # Apply the mask to the voxel world
+        world_array[mask] = 1
 
-            choices = (
-                VoxelType.STONE.value,
-                VoxelType.GRASS.value
-            )
+        choices = (
+            VoxelType.STONE.value,
+            VoxelType.GRASS.value
+        )
 
-            world_array = np.where(world_array == 1, np.random.choice(choices, size=world_array.shape), world_array)
+        world_array = np.where(world_array == 1, np.random.choice(choices, size=world_array.shape), world_array)
 
-            #world_array = np.zeros((5, 5, 5), dtype=int)
-            voxel_world = VoxelWorld(world_array, voxel_size)
+        #world_array = np.zeros((5, 5, 5), dtype=int)
+        voxel_world = VoxelWorld(world_array, voxel_size)
 
-            '''    
-            if coordinate == (0, 0):
-                voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
-            voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
-            voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
-            voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(1, 1, 0, VoxelType.STONE)
-            voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
-            '''
+        '''    
+        if coordinate == (0, 0):
+            voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
+        voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
+        voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
+        voxel_world.set_voxel(-1, 0, 0, VoxelType.STONE)
+        voxel_world.set_voxel(0, 1, 0, VoxelType.STONE)
+        voxel_world.set_voxel(0, -1, 0, VoxelType.STONE)
+        voxel_world.set_voxel(1, -1, 0, VoxelType.STONE)
+        voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
+        voxel_world.set_voxel(1, 1, 0, VoxelType.STONE)
+        voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
+        '''
 
+        return voxel_world
 
-            voxel_world_map[coordinate] = voxel_world
-            return voxel_world
-
-        return voxel_world_map.get(coordinate) 
 
     @staticmethod
     def generate_perlin_height_map(chunk_size: int, chunk_coordinate: tuple[int, int]) -> np.ndarray:

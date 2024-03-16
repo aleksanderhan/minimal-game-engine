@@ -3,6 +3,8 @@ import pyautogui
 import argparse
 import copy
 import random
+import cProfile
+
 
 from math import cos, sin, radians
 from functools import lru_cache
@@ -22,8 +24,7 @@ from panda3d.bullet import (
     BulletWorld, BulletRigidBodyNode, BulletSphereShape,
     BulletTriangleMesh, BulletTriangleMeshShape, BulletClosestHitRayResult
 )
-from panda3d.bullet import BulletRigidBodyNode
-from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletDebugNode
+from panda3d.bullet import BulletWorld, BulletSphereShape, BulletDebugNode
 from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
 from panda3d.core import WindowProperties
@@ -258,7 +259,7 @@ class GameEngine(ShowBase):
             # Set the voxel type at the calculated local coordinate
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
             voxel_world.create_world_mesh()
-            self.chunk_manager.load_chunk(coordinate, voxel_world)
+            self.chunk_manager.load_chunk(voxel_world)
             pass
         except Exception as e:
             print(e)
@@ -594,7 +595,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--terrain', action='store', default="flat")
-    parser.add_argument('--texture', action='store', default="chess")
     parser.add_argument('--debug', action="store_true", default=False)
     parser.add_argument('--normals', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)

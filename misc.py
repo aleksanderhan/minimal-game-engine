@@ -1,5 +1,6 @@
 import numpy as np
 from math import cos, sin, radians
+from direct.stdpy.threading import Lock
 
 from panda3d.core import (
     CardMaker, Vec3
@@ -83,3 +84,30 @@ def build_robot(physicsWorld, position=(10, 10, 10)):
         # The last argument 'True' specifies use_frame_a; adjust according to your needs
 
         physicsWorld.attachConstraint(hinge_joint)
+
+
+class ConcurrentSet:
+
+    def __init__(self):
+        self.lock = Lock()
+        self.set = set()
+
+    def add(self, item: Any):
+        with self.lock:
+            self.set.add(item)
+
+    def remove(self, item: Any):
+        with self.lock:
+            self.set.remove(item)
+
+    def __contains__(self, item: Any) -> bool:
+        with self.lock:
+            return item in self.set
+        
+    def __sub__(self, other_set: set[Any]) -> set[Any]:
+        return self.set - other_set
+    
+    def __iter__(self) -> Iterator[Any]:
+        with self.lock:
+            # Make a copy for safe iteration
+            return iter(list(self.set))
