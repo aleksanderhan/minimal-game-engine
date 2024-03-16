@@ -26,7 +26,7 @@ class IndexTools:
         offset = (n - 1) // 2
         i = ix + offset
         j = iy + offset
-        k = iz  # No change needed for z as it cannot be negative.
+        k = iz # No change needed for z as it cannot be negative.
         return i, j, k
 
     @lru_cache

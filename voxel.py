@@ -269,7 +269,6 @@ class VoxelTools:
         # Rotate each point in the face 90 degrees counter-clockwise around the Y axis
         return [(z, y, -x) for x, y, z in face]
 
-    
     @staticmethod
     def identify_exposed_voxels(world_array: np.ndarray) -> np.ndarray:
         """

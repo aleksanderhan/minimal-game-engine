@@ -3,8 +3,6 @@ import pyautogui
 import argparse
 import copy
 import random
-import cProfile
-
 
 from math import cos, sin, radians
 from functools import lru_cache
@@ -92,7 +90,7 @@ class GameEngine(ShowBase):
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 1#16
+        n = 16
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -103,7 +101,7 @@ class GameEngine(ShowBase):
         self.placeholder_cube = None
         self.spawn_distance = 10
 
-        self.camera.setPos(0, 0, 10)
+        self.camera.setPos(0, 0, 20)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
@@ -257,6 +255,8 @@ class GameEngine(ShowBase):
             # Set the voxel type at the calculated local coordinate
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
             voxel_world.create_world_mesh()
+            terrain_np = GeometryTools.create_geometry(voxel_world.vertices, voxel_world.indices, debug=self.args.debug)
+            voxel_world.terrain_np = terrain_np
             self.chunk_manager.load_chunk(voxel_world)
         except Exception as e:
             print(e)
@@ -280,7 +280,7 @@ class GameEngine(ShowBase):
             voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
             print("voxel_center_pos", voxel_center_pos)
             chunk_coords = WorldTools.calculate_world_chunk_coordinate(voxel_center_pos, self.chunk_size, self.voxel_size)
-            print("chunk_coords", chunk_coords)
+            print("chunk_coords", chunk_coords)           
             center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_coords, self.chunk_size, self.voxel_size)
             print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
 
@@ -299,7 +299,6 @@ class GameEngine(ShowBase):
         # Set up the task to remove the text
         self.doMethodLater(5, self.remove_info_text, "RemoveInfoText")
         
-
     def remove_info_text(self, task: Task) -> int:
         self.info_display.destroy()
         return Task.done
@@ -396,8 +395,6 @@ class GameEngine(ShowBase):
         - chunk_x, chunk_y: The chunk's position in the grid/map.
         - scale: The scale factor used for the visualization length of normals.
         """
-        coordinate = WorldTools.calculate_world_chunk_coordinate(pos, self.chunk_size, self.voxel_size)
-
         lines_np = NodePath("normals_visualization")
         lines = LineSegs()
         lines.setThickness(2.0)
@@ -596,10 +593,14 @@ if __name__ == "__main__":
     parser.add_argument('--normals', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
-    if args.debug:
-        loadPrcFileData('', 'want-pstats 1')
 
     game = GameEngine(args)
+    if args.debug:
+        import cProfile
+        import pstats
+        loadPrcFileData('', 'want-pstats 1')
+        cProfile.run('game.run()', 'profile_stats')
+
     # Create a WindowProperties object
     props = WindowProperties()
     # Set the cursor visibility to False
@@ -607,3 +608,7 @@ if __name__ == "__main__":
     # Apply the properties to the main window
     game.win.requestProperties(props)
     game.run()
+
+    if args.debug:
+        p = pstats.Stats('profile_stats')
+        p.sort_stats('cumulative').print_stats()

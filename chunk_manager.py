@@ -93,8 +93,8 @@ class ChunkManager:
         self.load_queue = ReprioritizationQueue()
         self.unload_queue = ReprioritizationQueue()
 
-        self.chunk_radius = 1#8
-        self.num_chunks = 2*int(3.14*self.chunk_radius**2)
+        self.chunk_radius = 8
+        self.num_chunks = 4*int(3.14*self.chunk_radius**2)
         self.batch_size = self.num_workers * 2
         print("num_chunks", self.num_chunks)
         print("batch_size", self.batch_size)

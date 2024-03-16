@@ -16,8 +16,8 @@ class VoxelWorld:
 
         self.voxel_size = voxel_size
         self.world_array = world_array
-        
         self.chunk_coord: tuple[int, int] = None
+        
         self.vertices: np.ndarray = None
         self.indices: np.ndarray = None
         self.terrain_np: NodePath = None
@@ -25,11 +25,13 @@ class VoxelWorld:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, VoxelWorld):
-            return np.array_equal(self.world_array, other.world_array) and self.chunk_coord == other.chunk_coord
+            return np.array_equal(self.world_array, other.world_array) and self.chunk_coord == other.chunk_coord \
+                and self.voxel_size == other.voxel_size and self.chunk_coord == other.chunk_coord
+        
         return False
     
     def __hash__(self):
-        return hash((self.chunk_coord, self.world_array))
+        return hash((self.chunk_coord, self.world_array, self.voxel_size))
         
     def get_voxel_type(self, ix: int, iy: int, iz: int) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
