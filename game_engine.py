@@ -413,7 +413,7 @@ class GameEngine(ShowBase):
             global_v = Vec3(local_v.getX() + pos.x, local_v.getY() + pos.y, local_v.getZ() + self.ground_height)
 
             # Calculate normal end point
-            normal_end = global_v + n * scale
+            normal_end = global_v + n * scale * self.voxel_size
 
             lines.moveTo(global_v)
             lines.drawTo(normal_end)
