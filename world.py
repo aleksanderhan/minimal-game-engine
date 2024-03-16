@@ -175,10 +175,10 @@ class WorldTools:
 
         world_array = np.where(world_array == 1, np.random.choice(choices, size=world_array.shape), world_array)
 
-        #world_array = np.zeros((5, 5, 5), dtype=int)
+        world_array = np.zeros((5, 5, 5), dtype=int)
         voxel_world = VoxelWorld(world_array, voxel_size)
 
-        '''    
+        #'''    
         if coordinate == (0, 0):
             voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
         voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
@@ -190,7 +190,7 @@ class WorldTools:
         voxel_world.set_voxel(-1, -1, 0, VoxelType.STONE)
         voxel_world.set_voxel(1, 1, 0, VoxelType.STONE)
         voxel_world.set_voxel(-1, 1, 0, VoxelType.STONE)
-        '''
+        #'''
 
         return voxel_world
 

@@ -92,7 +92,7 @@ class GameEngine(ShowBase):
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 16
+        n = 1#16
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -126,8 +126,6 @@ class GameEngine(ShowBase):
         self.accept('g', self.toggle_gravity)
         self.accept('b', self.toggle_build_mode)
         self.accept('i', self.print_world_info)
-        self.accept('t', self.chunk_manager._identify_chunks_to_load_and_unload)
-
 
     def setup_environment(self):
         #build_robot(self.physics_world)
@@ -260,7 +258,6 @@ class GameEngine(ShowBase):
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
             voxel_world.create_world_mesh()
             self.chunk_manager.load_chunk(voxel_world)
-            pass
         except Exception as e:
             print(e)
     
