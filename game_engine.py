@@ -102,7 +102,7 @@ class GameEngine(ShowBase):
         self.placeholder_cube = None
         self.spawn_distance = 10
 
-        self.camera.setPos(0, 0, 100)
+        self.camera.setPos(0, 0, 10)
         self.camera.lookAt(0, 0, 0)
 
         self.setup_physics()
