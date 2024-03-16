@@ -243,16 +243,16 @@ class GameEngine(ShowBase):
         self.object_manager.register_object(object, position, orientation)
 
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType = VoxelType.STONE):
-        coordinate = WorldTools.calculate_world_chunk_coordinate(position, self.chunk_size, self.voxel_size)
-        voxel_world = self.chunk_manager.get_voxel_world(coordinate)
+        coordinates = WorldTools.calculate_world_chunk_coordinates(position, self.chunk_size, self.voxel_size)
+        voxel_world = self.chunk_manager.get_voxel_world(coordinates)
 
-        center_chunk_pos = WorldTools.calculate_chunk_world_position(coordinate, self.chunk_size, self.voxel_size)
+        center_chunk_pos = WorldTools.calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
         ix = int((position.x - center_chunk_pos.x) / self.voxel_size)
         iy = int((position.y - center_chunk_pos.y) / self.voxel_size)
         iz = int((position.z + self.voxel_size) / self.voxel_size)
         
         try:
-            # Set the voxel type at the calculated local coordinate
+            # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
             voxel_world.create_world_mesh()
             terrain_np = GeometryTools.create_geometry(voxel_world.vertices, voxel_world.indices, debug=self.args.debug)
@@ -278,7 +278,7 @@ class GameEngine(ShowBase):
                 print("ijk", ijk, "position", position)
 
             voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            chunk_coord = WorldTools.calculate_world_chunk_coordinate(voxel_center_pos, self.chunk_size, self.voxel_size)
+            chunk_coord = WorldTools.calculate_world_chunk_coordinates(voxel_center_pos, self.chunk_size, self.voxel_size)
             center_chunk_pos = WorldTools.calculate_chunk_world_position(chunk_coord, self.chunk_size, self.voxel_size)
 
             info_text = f"""
@@ -421,11 +421,11 @@ class GameEngine(ShowBase):
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
 
-    def apply_texture_and_physics_to_chunk(self, coordinate: tuple[int, int], voxel_world: VoxelWorld):
+    def apply_texture_and_physics_to_chunk(self, coordinates: tuple[int, int], voxel_world: VoxelWorld):
         terrain_np = voxel_world.terrain_np
         terrain_np.reparentTo(self.render)
 
-        world_pos = WorldTools.calculate_chunk_world_position(coordinate, self.chunk_size, self.voxel_size)
+        world_pos = WorldTools.calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
         terrain_np.setPos(world_pos.x, world_pos.y, self.ground_height)
 
         if self.args.debug:
@@ -434,7 +434,7 @@ class GameEngine(ShowBase):
         if self.args.normals:
             self.visualize_normals(terrain_np, world_pos)
 
-        # Position the flat terrain chunk according to its world coordinate
+        # Position the flat terrain chunk according to its world coordinates
         terrain_node = self.add_terrain_mesh_to_physics(voxel_world, world_pos)
 
         voxel_world.terrain_np = terrain_np

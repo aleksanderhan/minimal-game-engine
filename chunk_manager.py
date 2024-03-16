@@ -103,12 +103,12 @@ class ChunkManager:
         self.game_engine.taskMgr.add(self._load_closest_chunks, "LoadClosestChunks")
         self.game_engine.taskMgr.doMethodLater(1, self._identify_chunks_to_load_and_unload, "IdentifyChunksToLoadAndUnload")
 
-    def get_player_chunk_coordinate(self) -> tuple[int, int]:
+    def get_player_chunk_coordinates(self) -> tuple[int, int]:
         player_pos = self.game_engine.camera.getPos()
-        return WorldTools.calculate_world_chunk_coordinate(player_pos, self.game_engine.chunk_size, self.game_engine.voxel_size)
+        return WorldTools.calculate_world_chunk_coordinates(player_pos, self.game_engine.chunk_size, self.game_engine.voxel_size)
 
-    def get_voxel_world(self, coordinate: tuple[int, int]) -> VoxelWorld:
-        return self.loaded_chunks.get(coordinate)
+    def get_voxel_world(self, coordinates: tuple[int, int]) -> VoxelWorld:
+        return self.loaded_chunks.get(coordinates)
     
     def get_number_of_loaded_vertices(self) -> int:
         result = 0
@@ -131,8 +131,8 @@ class ChunkManager:
         #print("load_chunk", voxel_world.chunk_coord, "dt", dt)
     
     def _callback(self, id: tuple[tuple[int, int], VoxelWorld]):
-        coordinate, voxel_world = id
-        self.loaded_chunks[coordinate] = voxel_world
+        coordinates, voxel_world = id
+        self.loaded_chunks[coordinates] = voxel_world
         self.load_chunk(voxel_world)
 
     def _error_callback(self, exc):
@@ -147,7 +147,7 @@ class ChunkManager:
         return Task.cont
     
     @staticmethod
-    def _worker(coordinate: tuple[int, int],
+    def _worker(coordinates: tuple[int, int],
                 chunk_size: int, 
                 max_height: int, 
                 voxel_size:int, 
@@ -155,14 +155,14 @@ class ChunkManager:
         
         # Generate the chunk and obtain both visual (terrain_np) and physics components (terrain_node)
         t0 = time.perf_counter()
-        voxel_world = WorldTools.create_voxel_world(chunk_size, max_height, coordinate, voxel_size)
-        voxel_world.chunk_coord = coordinate
+        voxel_world = WorldTools.create_voxel_world(chunk_size, max_height, coordinates, voxel_size)
+        voxel_world.chunk_coord = coordinates
         voxel_world.create_world_mesh()
         terrain_np = GeometryTools.create_geometry(voxel_world.vertices, voxel_world.indices, debug=debug)
         voxel_world.terrain_np = terrain_np
         dt = time.perf_counter() - t0
         #print("worker", dt)
-        return coordinate, voxel_world
+        return coordinates, voxel_world
     
     def _identify_chunks_to_load_and_unload(self, task: Task) -> Task:
         t0 = time.perf_counter()
@@ -171,18 +171,18 @@ class ChunkManager:
         change_priority: list[TaskWrapper] = []
 
         # Iterate over a square grid centered on the player to find chunks to load withing the chunk radius, centered on the player. 
-        player_chunk_coords = self.get_player_chunk_coordinate()
+        player_chunk_coords = self.get_player_chunk_coordinates()
         player_chunk_x, player_chunk_y = player_chunk_coords
         for x in range(player_chunk_x - self.chunk_radius, player_chunk_x + self.chunk_radius + 1):
             for y in range(player_chunk_y - self.chunk_radius, player_chunk_y + self.chunk_radius + 1):
-                coordinate = (x, y)
+                coordinates = (x, y)
                 
-                distance_from_player = WorldTools.calculate_distance_between_2d_points(coordinate, player_chunk_coords)
+                distance_from_player = WorldTools.calculate_distance_between_2d_points(coordinates, player_chunk_coords)
                 if distance_from_player < self.chunk_radius: 
-                    load_task = TaskWrapper(coordinate, distance_from_player)
+                    load_task = TaskWrapper(coordinates, distance_from_player)
                     chunks_inside_radius.add(load_task) # Add the chunks outside the radius, but inside the square
                     
-                    if coordinate not in self.loaded_chunks:
+                    if coordinates not in self.loaded_chunks:
                         if load_task in self.load_queue.scheduled_for_loading:
                             change_priority.append(load_task)
                         else:
@@ -205,8 +205,8 @@ class ChunkManager:
             self._unload_chunk(chunk)
         return Task.cont
 
-    def _unload_chunk(self, coordinate: tuple[int, int]):
-        voxel_world = self.loaded_chunks.pop(coordinate, None)
+    def _unload_chunk(self, coordinates: tuple[int, int]):
+        voxel_world = self.loaded_chunks.pop(coordinates, None)
         if voxel_world:
             voxel_world.terrain_np.removeNode()
             self.game_engine.physics_world.removeRigidBody(voxel_world.terrain_node)

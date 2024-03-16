@@ -28,7 +28,6 @@ class VoxelWorld:
         if isinstance(other, VoxelWorld):
             return np.array_equal(self.world_array, other.world_array) and self.chunk_coord == other.chunk_coord \
                 and self.voxel_size == other.voxel_size and self.chunk_coord == other.chunk_coord
-        
         return False
     
     def __hash__(self):
@@ -37,12 +36,12 @@ class VoxelWorld:
     def get_voxel_type(self, ix: int, iy: int, iz: int) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
         # and offset is half the size of the current array dimensions.
-        i, j, k = IndexTools.voxel_grid_coordinate_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = IndexTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         voxel_type_int = self.world_array[i, j, k]
         return voxel_type_map[voxel_type_int]
 
     def set_voxel(self, ix: int, iy: int, iz: int, voxel_type: VoxelType):
-        i, j, k = IndexTools.voxel_grid_coordinate_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = IndexTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         self.world_array[i, j, k] = voxel_type.value
 
     def create_world_mesh(self):
@@ -53,7 +52,7 @@ class VoxelWorld:
             voxel_size: The size of each voxel in world units.
 
         Returns:
-            vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinate of a vertex and its normal (nx, ny, nz).
+            vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz).
             indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
         """
 
@@ -66,7 +65,7 @@ class VoxelWorld:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinate(i, j, k, self.world_array.shape[0])
+            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinates(i, j, k, self.world_array.shape[0])
             exposed_faces = VoxelTools.check_surrounding_air(self.world_array, i, j, k)
 
             for face_name, normal in normals.items():
@@ -77,7 +76,7 @@ class VoxelWorld:
 
                     voxel_type = self.get_voxel_type(ix, iy, iz)
 
-                    # Append generated vertices, normals, and texture coordinate to the list
+                    # Append generated vertices, normals, and texture coordinates to the list
                     for fv, fn in zip(face_vertices, face_normals):
                         vertices.extend([*fv, *fn, voxel_type.value])
                     
@@ -120,12 +119,12 @@ class WorldTools:
         nudge = hit_normal * (voxel_size * 0.015)  # Nudge by 1.5% of the voxel size towards the voxel center
         adjusted_hit_pos = hit_pos - nudge
 
-        # Convert the adjusted hit position to voxel grid coordinate
+        # Convert the adjusted hit position to voxel grid coordinates
         grid_x = round(adjusted_hit_pos.x / voxel_size)
         grid_y = round(adjusted_hit_pos.y / voxel_size)
         grid_z = round(adjusted_hit_pos.z / voxel_size)
 
-        # Calculate the center of the voxel in world coordinate
+        # Calculate the center of the voxel in world coordinates
         voxel_center_x = grid_x * voxel_size
         voxel_center_y = grid_y * voxel_size
         voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
@@ -146,7 +145,7 @@ class WorldTools:
     
     @lru_cache
     @staticmethod
-    def create_voxel_world(chunk_size: int, max_height: int, coordinate: tuple[int, int], voxel_size: float) -> VoxelWorld:
+    def create_voxel_world(chunk_size: int, max_height: int, chunk_coordinates: tuple[int, int], voxel_size: float) -> VoxelWorld:
         width = chunk_size
         depth = chunk_size
         
@@ -155,7 +154,7 @@ class WorldTools:
         
         # Generate or retrieve heightmap for this chunk
         heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
-        #heightmap = WorldTools.generate_perlin_height_map(chunk_size, coordinate)
+        #heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_coordinates)
         
         # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
         height_levels = np.floor(heightmap).astype(int)
@@ -182,7 +181,7 @@ class WorldTools:
         voxel_world = VoxelWorld(world_array, voxel_size)
 
         '''    
-        if coordinate == (0, 0):
+        if coordinates == (0, 0):
             voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
         voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
         voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
@@ -199,8 +198,8 @@ class WorldTools:
 
 
     @staticmethod
-    def generate_perlin_height_map(chunk_size: int, chunk_coordinate: tuple[int, int]) -> np.ndarray:
-        chunk_x, chunk_y = chunk_coordinate
+    def generate_perlin_height_map(chunk_size: int, chunk_coordinates: tuple[int, int]) -> np.ndarray:
+        chunk_x, chunk_y = chunk_coordinates
         scale = 0.05  # Adjust scale to control the "zoom" level of the noise
         octaves = 4  # Number of layers of noise to combine
         persistence = 0.5  # Amplitude of each octave
@@ -214,7 +213,7 @@ class WorldTools:
 
         for x in range(chunk_size + 1):
             for y in range(chunk_size + 1):
-                # Calculate global coordinate
+                # Calculate global coordinates
                 global_x = (global_offset_x + x) * scale
                 global_y = (global_offset_y + y) * scale
 
@@ -240,27 +239,27 @@ class WorldTools:
         return np.full((adjusted_size, adjusted_size), height)
     
     @staticmethod
-    def calculate_chunk_world_position(coordinate: tuple[int, int], chunk_size: int, voxel_size: float) -> Vec2:
+    def calculate_chunk_world_position(coordinates: tuple[int, int], chunk_size: int, voxel_size: float) -> Vec2:
         """
-        Calculates the world position of the chunk origo based on its grid coordinate.
+        Calculates the world position of the chunk origo based on its grid coordinates.
 
         Parameters:
-        - coordinate: The chunk's coordinate in the grid/map.
+        - coordinates: The chunk's coordinates in the grid/map.
         - chunk_size: Number of voxels along a single axis of the chunk.
         - voxel_size: Size of a voxel
 
         Returns:
         Vec2: The world position of the chunk.
         """
-        chunk_x, chunk_y = coordinate
+        chunk_x, chunk_y = coordinates
         x = chunk_x * chunk_size * voxel_size
         y = chunk_y * chunk_size * voxel_size
         return Vec2(x, y)
     
     @staticmethod
-    def calculate_world_chunk_coordinate(position: Vec2, chunk_size: int, voxel_size: float) -> tuple[int, int]:
+    def calculate_world_chunk_coordinates(position: Vec2, chunk_size: int, voxel_size: float) -> tuple[int, int]:
         """
-        Calculates the chunk grid coordinate corresponding to a world position.
+        Calculates the chunk grid coordinates corresponding to a world position.
 
         Parameters:
         - position: A Vec3 representing the world position.
@@ -268,7 +267,7 @@ class WorldTools:
         - chunk_size: Number of voxels along a single axis of the chunk.
 
         Returns:    
-        Tuple[int, int]: The chunk's grid coordinate (chunk_x, chunk_y).
+        Tuple[int, int]: The chunk's grid coordinates (chunk_x, chunk_y).
         """
         # Calculate the half-size of a chunk in world units
         half_chunk_size_world_units = (chunk_size * voxel_size) / 2
@@ -277,7 +276,7 @@ class WorldTools:
         adjusted_pos_x = position.x + half_chunk_size_world_units
         adjusted_pos_y = position.y + half_chunk_size_world_units
 
-        # Calculate chunk coordinate
+        # Calculate chunk coordinates
         chunk_x = math.floor(adjusted_pos_x / (chunk_size * voxel_size)) if adjusted_pos_x >= 0 else math.ceil(adjusted_pos_x / (chunk_size * voxel_size)) - 1
         chunk_y = math.floor(adjusted_pos_y / (chunk_size * voxel_size)) if adjusted_pos_y >= 0 else math.ceil(adjusted_pos_y / (chunk_size * voxel_size)) - 1
 
