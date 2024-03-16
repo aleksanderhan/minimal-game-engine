@@ -18,7 +18,6 @@ Minimal game engine written in python.
 
 * Run it like so in the terminal: `python game_engine.py` for a flat world experience.
 * Run it with the terrain flag: `python game_engine.py --terrain=perlin` for a world generated with perlin noise, else `flat`
-* Run it with cProfile: `python -m cProfile -s time game_engine.py`
 
 ### Controls
 
@@ -32,7 +31,7 @@ small and big bullets respectively. Use `f` key to place blocks.
 ### Gravity:
 ![Semi-autogpt example](docs/demo2.gif)
 
-### Many-body physics:
+### Multi-collision physics:
 ![Semi-autogpt example](docs/demo3.gif)
 
 ### Procedural generated terrain:

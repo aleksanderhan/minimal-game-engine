@@ -45,6 +45,6 @@ class IndexTools:
         offset = (n - 1) // 2
         ix = i - offset
         iy = j - offset
-        iz = k - 1 # No change needed for z as it cannot be negative.
+        iz = k # No change needed for z as it cannot be negative.
         
         return ix, iy, iz

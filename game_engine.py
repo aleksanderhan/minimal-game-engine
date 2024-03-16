@@ -268,26 +268,26 @@ class GameEngine(ShowBase):
             hit_pos = raycast_result.getHitPos()
             hit_normal = raycast_result.getHitNormal()
             print("---------------------")
-            print("hit_pos:", hit_pos)
-            print("normal", hit_normal)
             print("hit_node", hit_node)
+            
             if not hit_node.static:
                 hit_object = hit_node.getPythonTag("object")
                 ijk = hit_node.getPythonTag("ijk")
                 node_path = hit_object.node_paths[ijk]
                 position = node_path.getPos()
                 print("ijk", ijk, "position", position)
+
             voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            print("voxel_center_pos", voxel_center_pos)
-            chunk_coords = WorldTools.calculate_world_chunk_coordinate(voxel_center_pos, self.chunk_size, self.voxel_size)
-            print("chunk_coords", chunk_coords)           
-            center_chunk_pos_x, center_chunk_pos_y = WorldTools.calculate_chunk_world_position(chunk_coords, self.chunk_size, self.voxel_size)
-            print("center_chunk_pos_x, center_chunk_pos_y", center_chunk_pos_x, center_chunk_pos_y)
+            chunk_coord = WorldTools.calculate_world_chunk_coordinate(voxel_center_pos, self.chunk_size, self.voxel_size)
+            center_chunk_pos = WorldTools.calculate_chunk_world_position(chunk_coord, self.chunk_size, self.voxel_size)
 
             info_text = f"""
                 Hit position: {hit_pos}
                 Hit normal: {hit_normal}
                 Hit voxel center: {voxel_center_pos}
+                Hit voxel static: {hit_node.static}
+                Hit chunk coord: {chunk_coord}
+                Hit chunk center pos: {center_chunk_pos}
             """
         else:
             info_text = "No hit detected!"
@@ -295,7 +295,7 @@ class GameEngine(ShowBase):
         if self.info_display:
             self.info_display.destroy()
     
-        self.info_display = OnscreenText(text=info_text, pos=(1, -0.8), scale=0.05, fg=(1, 1, 1, 1), align=TextNode.ARight, mayChange=True)
+        self.info_display = OnscreenText(text=info_text, pos=(1, -0.7), scale=0.05, fg=(1, 1, 1, 1), align=TextNode.ARight, mayChange=True)
         # Set up the task to remove the text
         self.doMethodLater(5, self.remove_info_text, "RemoveInfoText")
         
@@ -591,11 +591,12 @@ if __name__ == "__main__":
     parser.add_argument('--terrain', action='store', default="flat")
     parser.add_argument('--debug', action="store_true", default=False)
     parser.add_argument('--normals', action="store_true", default=False)
+    parser.add_argument('--profile', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
 
     game = GameEngine(args)
-    if args.debug:
+    if args.debug or args.profile:
         import cProfile
         import pstats
         loadPrcFileData('', 'want-pstats 1')
@@ -609,6 +610,6 @@ if __name__ == "__main__":
     game.win.requestProperties(props)
     game.run()
 
-    if args.debug:
+    if args.debug or args.profile:
         p = pstats.Stats('profile_stats')
         p.sort_stats('cumulative').print_stats()

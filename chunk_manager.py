@@ -15,15 +15,15 @@ from geom import GeometryTools
 
 class TaskWrapper:
 
-    def __init__(self, data: Any, priority: int):
-        self.data = data
+    def __init__(self, id: Any, priority: int):
+        self.id = id
         self.priority = priority
 
     def __eq__(self, other) -> bool:
-        return self.data == other.data #and self.priority == other.priority
+        return self.id == other.id # Do not add: and self.priority == other.priority - because we use the method for checking if a task is in queue
     
     def __hash__(self) -> int:
-        return hash(self.data)
+        return hash((self.id))
 
 
 class ReprioritizationQueue:
@@ -38,40 +38,39 @@ class ReprioritizationQueue:
         with self.lock:
             self.counter += 1
             heapq.heappush(self.queue, (task.priority, self.counter, task))
-
+            self.scheduled_for_loading.add(task)
+    
     def get(self) -> TaskWrapper | None:
         with self.lock:
             if not self.queue:
                 return None
             _, _, task = heapq.heappop(self.queue)
-            return task.data
+            self.scheduled_for_loading.remove(task)
+            return task
     
     def task_in_queue(self, task: TaskWrapper) -> bool:
-        return task in set(self.queue)
-    
-    def get_scheduled_tasks(self) -> set[TaskWrapper]:
-        return set(self.queue)
+        return task in self.scheduled_for_loading
 
     def batch_reprioritize_tasks(self, task_list: list[TaskWrapper]):
         with self.lock:
             # Create a mapping from task to new priority for quick lookup
-            new_priorities = {task.data: task.priority for task in task_list}
+            new_priorities = {task.id: task.priority for task in task_list}
 
             # Iterate over the queue and update priorities based on new_priorities
             for i, (_, counter, task) in enumerate(self.queue):
-                if task.data in new_priorities:
+                if task.id in new_priorities:
                     # Update priority directly in the queue
-                    self.queue[i] = (new_priorities[task.data], counter, task)
+                    self.queue[i] = (new_priorities[task.id], counter, task)
 
             # After updating the priorities in the queue, re-heapify to maintain the heap invariant
             heapq.heapify(self.queue)
 
-    def remove(self, task_to_remove: TaskWrapper):
+    def remove(self, task_id_to_remove: tuple[int, int]):
         with self.lock:
             # Find the index of the task to remove
             index_to_remove = None
             for i, (_, _, task) in enumerate(self.queue):
-                if task.data == task_to_remove.data:
+                if task.id == task_id_to_remove:
                     index_to_remove = i
                     break
 
@@ -79,6 +78,7 @@ class ReprioritizationQueue:
             if index_to_remove is not None:
                 self.queue.pop(index_to_remove)
                 heapq.heapify(self.queue)
+                self.scheduled_for_loading.remove(task)
 
 
 class ChunkManager:
@@ -130,8 +130,8 @@ class ChunkManager:
         dt = time.perf_counter() - t0
         #print("load_chunk", voxel_world.chunk_coord, "dt", dt)
     
-    def _callback(self, data: tuple[tuple[int, int], VoxelWorld]):
-        coordinate, voxel_world = data
+    def _callback(self, id: tuple[tuple[int, int], VoxelWorld]):
+        coordinate, voxel_world = id
         self.loaded_chunks[coordinate] = voxel_world
         self.load_chunk(voxel_world)
 
@@ -140,9 +140,9 @@ class ChunkManager:
     
     def _load_closest_chunks(self, task: Task) -> int:
         for _ in range(self.batch_size):
-            coordinate = self.load_queue.get()
-            if coordinate is not None:
-                params = (coordinate, self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_size, self.game_engine.args.debug)
+            load_task = self.load_queue.get()
+            if load_task is not None and not load_task in self.load_queue.scheduled_for_loading:
+                params = (load_task.id, self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_size, self.game_engine.args.debug)
                 self.pool.apply_async(ChunkManager._worker, params, callback=self._callback, error_callback=self._error_callback)
         return Task.cont
     
@@ -153,7 +153,7 @@ class ChunkManager:
                 voxel_size:int, 
                 debug: bool) -> tuple[tuple[int, int], VoxelWorld]:
         
-        # Generate the chunk and obtain both visual (terrainNP) and physics components (terrainNode)
+        # Generate the chunk and obtain both visual (terrain_np) and physics components (terrain_node)
         t0 = time.perf_counter()
         voxel_world = WorldTools.create_voxel_world(chunk_size, max_height, coordinate, voxel_size)
         voxel_world.chunk_coord = coordinate
@@ -168,7 +168,7 @@ class ChunkManager:
         t0 = time.perf_counter()
         
         chunks_inside_radius = set()
-        change_priority = []
+        change_priority: list[TaskWrapper] = []
 
         # Iterate over a square grid centered on the player to find chunks to load withing the chunk radius, centered on the player. 
         player_chunk_coords = self.get_player_chunk_coordinate()
@@ -179,16 +179,18 @@ class ChunkManager:
                 
                 distance_from_player = WorldTools.calculate_distance_between_2d_points(coordinate, player_chunk_coords)
                 if distance_from_player < self.chunk_radius: 
-                    chunks_inside_radius.add(coordinate) # Add the chunks outside the radius, but inside the square
+                    load_task = TaskWrapper(coordinate, distance_from_player)
+                    chunks_inside_radius.add(load_task) # Add the chunks outside the radius, but inside the square
+                    
                     if coordinate not in self.loaded_chunks:
-                        if self.load_queue.task_in_queue(TaskWrapper(coordinate, None)):
-                            change_priority.append(TaskWrapper(coordinate, distance_from_player))
+                        if load_task in self.load_queue.scheduled_for_loading:
+                            change_priority.append(load_task)
                         else:
-                            self.load_queue.put(TaskWrapper(coordinate, distance_from_player))
+                            self.load_queue.put(load_task)
 
-        scheduled_for_loading_and_outside_chunk_radius = self.load_queue.get_scheduled_tasks() - chunks_inside_radius
-        for coordinate in scheduled_for_loading_and_outside_chunk_radius:
-            self.load_queue.remove(TaskWrapper(coordinate, None))
+        scheduled_for_loading_and_outside_chunk_radius = self.load_queue.scheduled_for_loading - chunks_inside_radius
+        for load_task in scheduled_for_loading_and_outside_chunk_radius:
+            self.load_queue.remove(load_task.id)
 
         self.load_queue.batch_reprioritize_tasks(change_priority)
 

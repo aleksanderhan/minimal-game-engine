@@ -91,7 +91,6 @@ class VoxelWorld:
         self.indices = np.array(indices, dtype=np.int32)
 
    
-
 class WorldTools:
 
     @staticmethod
@@ -145,6 +144,7 @@ class WorldTools:
         node_np = hit_object.node_paths[ijk]
         return node_np.getPos()
     
+    @lru_cache
     @staticmethod
     def create_voxel_world(chunk_size: int, max_height: int, coordinate: tuple[int, int], voxel_size: float) -> VoxelWorld:
         width = chunk_size
@@ -154,8 +154,8 @@ class WorldTools:
         world_array = np.zeros((width, depth, max_height), dtype=int)
         
         # Generate or retrieve heightmap for this chunk
-        #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
-        heightmap = WorldTools.generate_perlin_height_map(chunk_size, coordinate)
+        heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
+        #heightmap = WorldTools.generate_perlin_height_map(chunk_size, coordinate)
         
         # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
         height_levels = np.floor(heightmap).astype(int)
@@ -201,8 +201,8 @@ class WorldTools:
     @staticmethod
     def generate_perlin_height_map(chunk_size: int, chunk_coordinate: tuple[int, int]) -> np.ndarray:
         chunk_x, chunk_y = chunk_coordinate
-        scale = 0.06  # Adjust scale to control the "zoom" level of the noise
-        octaves = 6  # Number of layers of noise to combine
+        scale = 0.05  # Adjust scale to control the "zoom" level of the noise
+        octaves = 4  # Number of layers of noise to combine
         persistence = 0.5  # Amplitude of each octave
         lacunarity = 1.5  # Frequency of each octave
 
@@ -228,7 +228,7 @@ class WorldTools:
                                     base=0)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 20
+                height_map[x, y] = height * 25
 
         return height_map
     
