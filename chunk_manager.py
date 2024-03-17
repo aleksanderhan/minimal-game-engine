@@ -4,7 +4,7 @@ import heapq
 import time
 import os
 import math
-from multiprocessing import Pool, RLock
+from multiprocessing import Pool, RLock, Lock
 from typing import Any
 
 from direct.task import Task
@@ -32,7 +32,7 @@ class ReprioritizationQueue:
     def __init__(self):
         self.queue: list[tuple[float, int, TaskWrapper]] = []
         self.scheduled: set[TaskWrapper] = set()
-        self.lock = RLock()
+        self.lock = Lock()
         self.counter = 0
 
     def put(self, task: TaskWrapper):
@@ -83,10 +83,11 @@ class ChunkManager:
 
         self.loaded_chunks: dict[tuple[int, int], VoxelWorld] = {}
 
-        self.num_workers = math.ceil(os.cpu_count() / 2)
+        self.num_workers = math.ceil(os.cpu_count() / 4)
         self.pool = Pool(processes=self.num_workers)
         self.load_queue = ReprioritizationQueue()
         self.unload_queue = ReprioritizationQueue()
+        self.tasks_actively_being_loaded: set[tuple[int, int]] = set()
 
         self.chunk_radius = 24
         self.num_chunks = 2*int(3.14*self.chunk_radius**2)
@@ -94,10 +95,9 @@ class ChunkManager:
         print("num_chunks", self.num_chunks)
         print("batch_size", self.batch_size)
 
-        #self.game_engine.taskMgr.add(self._load_closest_chunks, "LoadClosestChunks")
-        self.game_engine.taskMgr.doMethodLater(0.5, self._load_closest_chunks, "LoadClosestChunks")
+        self.game_engine.taskMgr.doMethodLater(0.3, self._load_closest_chunks, "LoadClosestChunks")
         #self.game_engine.taskMgr.doMethodLater(1, self._unload_chunk_furthest_away, "UnloadFurthestChunks")
-        self.game_engine.taskMgr.doMethodLater(0.5, self._identify_chunks_to_load_and_unload, "IdentifyChunksToLoadAndUnload")
+        self.game_engine.taskMgr.doMethodLater(0.3, self._identify_chunks_to_load_and_unload, "IdentifyChunksToLoadAndUnload")
 
     def get_player_chunk_coordinates(self) -> tuple[int, int]:
         player_pos = self.game_engine.camera.getPos()
@@ -133,18 +133,31 @@ class ChunkManager:
     
     def _callback(self, data: tuple[tuple[int, int], VoxelWorld, np.ndarray, np.ndarray]):
         self.load_chunk(*data)
+        task_id = data[0]
+        self.tasks_actively_being_loaded.remove(task_id)
 
     def _error_callback(self, exc):
         print('Worker error:', exc)
     
     def _load_closest_chunks(self, task: Task) -> int:
-        for _ in range(self.batch_size):
+        for _ in range(self.batch_size*2):
             load_task = self.load_queue.get()
             if load_task is not None:
                 # Check if the task is already loaded or in process.
-                if not load_task in self.load_queue.scheduled and load_task.id not in self.loaded_chunks:
-                    params = (load_task.id, self.game_engine.chunk_size, self.game_engine.max_height, self.game_engine.voxel_size, self.game_engine.args.debug)
+                if not load_task in self.load_queue.scheduled and \
+                        load_task.id not in self.loaded_chunks and \
+                        load_task.id not in self.tasks_actively_being_loaded:
+                    
+                    params = (  
+                        load_task.id, 
+                        self.game_engine.chunk_size, 
+                        self.game_engine.max_height, 
+                        self.game_engine.voxel_size,
+                        self.game_engine.args.debug
+                    )
                     self.pool.apply_async(ChunkManager._worker, params, callback=self._callback, error_callback=self._error_callback)
+                    self.tasks_actively_being_loaded.add(load_task.id)
+
         return Task.again
 
     @staticmethod
