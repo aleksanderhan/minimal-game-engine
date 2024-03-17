@@ -239,7 +239,7 @@ class GameEngine(ShowBase):
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
     def _create_translucent_voxel(self, position: Vec3) -> NodePath:
-        vertices, indices, = create_single_voxel_mesh(VoxelType.PLACEHOLDER_BLOCK, self.voxel_size, self.args.debug)
+        vertices, indices, = create_single_voxel_mesh(VoxelType.STONE, self.voxel_size, self.args.debug)
         cube = create_geometry(vertices, indices)
 
         # Set the cube's scale and position
@@ -248,12 +248,11 @@ class GameEngine(ShowBase):
         
         # Make the cube translucent
         cube.setTransparency(TransparencyAttrib.M_alpha)
-        cube.setAlphaScale(0.5)  # Adjust this value as needed for desired transparency
         
         # Apply a material to the cube for a specific color
-        #mat = Material()
-        #mat.setDiffuse(VBase4(0.5, 0.5, 0.8, 0.5))  # RGBA, last value is the alpha
-        #cube.setMaterial(mat, 1)
+        mat = Material()
+        mat.setDiffuse(VBase4(0.5, 0.5, 0.8, 0.5))  # RGBA, last value is the alpha
+        cube.setMaterial(mat, 1)
 
         # Reparent the cube to render it in the scene
         cube.reparentTo(self.render)
