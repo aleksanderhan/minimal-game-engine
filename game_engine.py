@@ -4,6 +4,7 @@ import argparse
 import copy
 import random
 import time
+import tqdm
 
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
@@ -49,11 +50,17 @@ loadPrcFileData('', 'win-size 1680 1050')
 loadPrcFileData("", "threading-model Cull/Draw")
 
 def pre_warmup_jit_functions():
-    index_to_voxel_grid_coordinates(0, 0, 0, 5)
-    voxel_grid_coordinates_to_index(0, 0, 0, 5)
+    print("Pre warming jit functions. Hold tight!")
     single_item_array = np.ones((1, 1, 1), np.uint8)
-    identify_exposed_voxels(single_item_array)
-    create_mesh(single_item_array, 1.0)
+    jit_functions = [
+        lambda: index_to_voxel_grid_coordinates(0, 0, 0, 5),
+        lambda: voxel_grid_coordinates_to_index(0, 0, 0, 5),
+        lambda: identify_exposed_voxels(single_item_array),
+        lambda: create_mesh(single_item_array, 1.0),
+    ]
+
+    for f in tqdm.tqdm(jit_functions):
+        f()
 
 
 class ObjectManager:
@@ -129,6 +136,7 @@ class GameEngine(ShowBase):
         self.camera_lift_speed = 20 * self.voxel_size
         self.camera_rotate_speed = 75
 
+        pre_warmup_jit_functions()
         self.setup_physics()
         self.setup_environment()
         self.setup_lighting()
@@ -288,7 +296,7 @@ class GameEngine(ShowBase):
         center_chunk_pos = calculate_chunk_world_position(chunk_coordinates, self.chunk_size, self.voxel_size)
         ix = int((position.x - center_chunk_pos.x) / self.voxel_size)
         iy = int((position.y - center_chunk_pos.y) / self.voxel_size)
-        iz = int((position.z + self.voxel_size) / self.voxel_size)
+        iz = int((position.z + self.voxel_size) / self.voxel_size) - 1
         
         t2 = time.perf_counter()
 
@@ -446,6 +454,7 @@ class GameEngine(ShowBase):
                                            voxel_world: VoxelWorld,
                                            vertices: np.ndarray,
                                            indices: np.ndarray):
+        
         terrain_np = voxel_world.terrain_np
         terrain_np.reparentTo(self.render)
 
@@ -482,7 +491,7 @@ class GameEngine(ShowBase):
 
         terrain_shape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
         terrain_node = BulletRigidBodyNode('Terrain')
-        terrain_node.setFriction(10)
+        terrain_node.setFriction(50)
         terrain_node.addShape(terrain_shape)
         terrain_np = self.render.attachNewNode(terrain_node)
 
@@ -614,8 +623,6 @@ if __name__ == "__main__":
     parser.add_argument('--profile', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
-
-    pre_warmup_jit_functions()
 
     game = GameEngine(args)
     if args.debug or args.profile:

@@ -11,7 +11,7 @@ from constants import material_properties, voxel_type_map
 def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node", debug: bool = False) -> NodePath:
     num_vertices = len(vertices) // 7
     vdata = GeomVertexData('voxel_data', _vertex_format_with_color(), Geom.UHStatic)
-    vdata.setNumRows(num_vertices)
+    vdata.uncleanSetNumRows(num_vertices)
 
     vertex_writer = GeomVertexWriter(vdata, 'vertex')
     normal_writer = GeomVertexWriter(vdata, 'normal')
@@ -57,3 +57,8 @@ def _vertex_format_with_color() -> GeomVertexArrayFormat:
     vertex_format = GeomVertexFormat.registerFormat(vertex_format)
 
     return vertex_format
+
+
+
+if __name__ == "__main__":
+    

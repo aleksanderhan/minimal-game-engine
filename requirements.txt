@@ -6,3 +6,4 @@ numpy
 scipy
 Pmw
 numba
+tqdm

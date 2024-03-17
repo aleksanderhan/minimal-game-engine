@@ -20,7 +20,7 @@ class TaskWrapper:
         self.priority = priority
 
     def __eq__(self, other) -> bool:
-        return self.id == other.id # Do not add: and self.priority == other.priority - because we use the method for checking if a task is in queue
+        return self.id == other.id
     
     def __hash__(self) -> int:
         return hash((self.id))

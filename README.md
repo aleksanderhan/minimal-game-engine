@@ -1,6 +1,6 @@
 # minimal-game-engine
 
-Minimal game engine written in python.
+Minimal voxel engine with breakable physics, written in python.
 
 ## Instructions
 
@@ -16,13 +16,11 @@ Minimal game engine written in python.
 
 ### How to run
 
-* Run it like so in the terminal: `python game_engine.py` for a flat world experience.
-* Run it with the terrain flag: `python game_engine.py --terrain=perlin` for a world generated with perlin noise, else `flat`
+* Run it like so in the terminal: `python game_engine.py` for a procedurally generated world experience.
 
 ### Controls
 
-Use the keys `a`,`s`,`d`,`w` to steer the position of the camera and use the mouse to steer the angle of the camera. Use left and right mouse click to shot
-small and big bullets respectively. Use `f` key to place blocks.
+Use the keys `a`,`s`,`d`,`w` to steer the position of the camera and use the mouse to steer the angle of the camera.
 
 ## Demo
 ### Collision physics:

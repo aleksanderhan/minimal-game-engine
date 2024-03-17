@@ -40,8 +40,6 @@ def create_mesh(voxel_array: np.ndarray, voxel_size: float) -> tuple[np.ndarray,
                 face_vertices = _generate_face_vertices(ix, iy, iz, face_id, voxel_size)
 
                 # Generate normals for each face
-                #face_normals = np.tile(np.array(normal), (4, 1))
-
                 face_normals = [normal for _ in range(4)] # 4 normals per face
                 voxel_type_value = voxel_array[i, j, k]
 
