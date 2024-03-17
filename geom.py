@@ -12,7 +12,7 @@ from utils import index_to_voxel_grid_coordinates
 def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node", debug: bool = False) -> NodePath:
     num_vertices = len(vertices) // 7
     vdata = GeomVertexData('voxel_data', _vertex_format_with_color(), Geom.UHStatic)
-    #vdata.setNumRows(num_vertices)
+    vdata.setNumRows(num_vertices)
 
     vertex_writer = GeomVertexWriter(vdata, 'vertex')
     normal_writer = GeomVertexWriter(vdata, 'normal')
@@ -44,7 +44,7 @@ def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom
 
     return NodePath(geom_node)
 
-@nb.jit(nopython=True, cache=True)
+@nb.njit(nopython=True, cache=True)
 def create_mesh(voxel_array: np.ndarray, exposed_voxels: np.ndarray, voxel_size: float) -> tuple[np.ndarray, np.ndarray]:
     """Efficiently creates mesh data for exposed voxel faces.
 
@@ -115,7 +115,7 @@ def _vertex_format_with_color() -> GeomVertexArrayFormat:
 
     return vertex_format
 
-@nb.jit(nopython=True, cache=True)
+@nb.njit(nopython=True, cache=True)
 def _check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[tuple[int, int]]:
     max_i, max_j, max_k = array.shape[0] - 1, array.shape[1] - 1, array.shape[2] - 1
     exposed_faces = []
@@ -129,7 +129,7 @@ def _check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[tu
     
     return exposed_faces
 
-@nb.jit(nopython=True, cache=True)
+@nb.njit(nopython=True, cache=True)
 def _generate_face_vertices(ix: int, iy: int, iz: int, face_id: tuple[int, int, int], voxel_size: int) -> np.ndarray:
     """
     Generates vertices and normals for a given voxel face.

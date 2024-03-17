@@ -1,4 +1,3 @@
-import numba as nb
 
 # Toggle generator. Returns a or b alternatingly on next()
 def toggle(a, b, yield_a=True):
@@ -7,8 +6,6 @@ def toggle(a, b, yield_a=True):
         yield_a = not yield_a
 
 
-
-@nb.jit(nopython=True, cache=True)
 def voxel_grid_coordinates_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[int, int, int]:
     """
     Convert world grid coordinates (ix, iy, iz) to array indices (i, j, k).
@@ -26,8 +23,6 @@ def voxel_grid_coordinates_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[
     k = iz # No change needed for z as it cannot be negative.
     return i, j, k
 
-
-@nb.jit(nopython=True, cache=True)
 def index_to_voxel_grid_coordinates(i: int, j: int, k: int , n: int) -> tuple[int, int, int]:
     """
     Convert array indices (i, j, k) back to world grid coordinates (ix, iy, iz).

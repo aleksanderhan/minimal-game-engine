@@ -98,7 +98,7 @@ class GameEngine(ShowBase):
         #self.taskMgr.popupControls()
         print("isThreadingSupported", Thread.isThreadingSupported())
         
-        self.voxel_size = 0.5
+        self.voxel_size = 0.25
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
@@ -111,13 +111,15 @@ class GameEngine(ShowBase):
 
         self.build_mode = False
         self.placeholder_cube: NodePath = None
-        self.selected_voxel_type_value = 0
         self.spawn_distance = 10
 
-        self.camera.setPos(0, 0, 100)
+        self.selected_voxel_type_value = 0
+        self.selected_voxel_type = VoxelType.AIR
+
+        self.camera.setPos(0, 0, 50)
         self.camera.lookAt(1, 1, 1)
-        self.camera_speed = 20
-        self.camera_lift_speed = 20
+        self.camera_speed = 20 * self.voxel_size
+        self.camera_lift_speed = 20 * self.voxel_size
         self.camera_rotate_speed = 75
 
         self.setup_physics()
@@ -149,12 +151,14 @@ class GameEngine(ShowBase):
         pass
 
     def on_mouse_wheel_up(self):
-        self.selected_voxel_type_value = (self.selected_voxel_type_value + 1) % len(VoxelType)
-        print("selected_voxel_type_value", self.selected_voxel_type_value)
+        self.selected_voxel_type_value = (self.selected_voxel_type_value + 1) % (len(VoxelType) - 1)
+        self.selected_voxel_type = voxel_type_map[self.selected_voxel_type_value]
+        print("selected_voxel_type_value", self.selected_voxel_type.name)
 
     def on_mouse_wheel_down(self):
-        self.selected_voxel_type_value = (self.selected_voxel_type_value - 1) % len(VoxelType)
-        print("selected_voxel_type_value", self.selected_voxel_type_value)
+        self.selected_voxel_type_value = (self.selected_voxel_type_value - 1) % (len(VoxelType) - 1)
+        self.selected_voxel_type = voxel_type_map[self.selected_voxel_type_value]
+        print("selected_voxel_type_value", self.selected_voxel_type.name)
 
     def print_world_info(self):
         t1 = time.perf_counter()
@@ -181,15 +185,15 @@ class GameEngine(ShowBase):
             else:
                 position = self.get_spawn_position()
 
-            self.placeholder_cube = self.create_translucent_voxel(position)
-            self.taskMgr.add(self.update_placeholder_cube, "UpdatePlaceholderCube")
+            self.placeholder_cube = self._create_translucent_voxel(position)
+            self.taskMgr.add(self._update_placeholder_cube, "UpdatePlaceholderCube")
         else:
             if self.placeholder_cube is not None:
                 self.taskMgr.remove("UpdatePlaceholderCube")
                 self.placeholder_cube.removeNode()
                 self.placeholder_cube = None
 
-    def update_placeholder_cube(self, task: Task) -> int:
+    def _update_placeholder_cube(self, task: Task) -> int:
         if self.placeholder_cube is not None:
             raycast_result = self.cast_ray_from_camera(self.spawn_distance)
             
@@ -222,7 +226,7 @@ class GameEngine(ShowBase):
         forward_vec = self.camera.getQuat().getForward()
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
-    def create_translucent_voxel(self, position: Vec3) -> NodePath:
+    def _create_translucent_voxel(self, position: Vec3) -> NodePath:
         t0 = time.perf_counter()
         voxel_type = voxel_type_map[self.selected_voxel_type_value]
         vertices, indices = create_single_voxel_mesh(voxel_type, self.voxel_size)
@@ -240,7 +244,7 @@ class GameEngine(ShowBase):
         cube.setTransparency(TransparencyAttrib.M_alpha)
         cube.setAlphaScale(0.5)  # Adjust this value as needed for desired transparency
         
-        # Optional: Apply a material to the cube if you want a specific color
+        # Apply a material to the cube for a specific color
         mat = Material()
         mat.setDiffuse(VBase4(0.5, 0.5, 0.8, 0.5))  # RGBA, last value is the alpha
         cube.setMaterial(mat, 1)
@@ -261,10 +265,10 @@ class GameEngine(ShowBase):
             if hit_node.static:
                 voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
                 create_position = voxel_center_pos + hit_normal * self.voxel_size
-                self.create_static_voxel(create_position)
+                self.create_static_voxel(create_position, self.selected_voxel_type)
             else:
                 hit_object = hit_node.getPythonTag("object")
-                create_position, velocity, orientation = hit_object.add_voxel(hit_pos, hit_normal, VoxelType.STONE, self)
+                create_position, velocity, orientation = hit_object.add_voxel(hit_pos, hit_normal, self.selected_voxel_type, self)
                 create_position = get_center_of_hit_dynamic_voxel(raycast_result) + hit_normal         
                 self.object_manager.update_object(hit_object, create_position, velocity, orientation)
         else:
@@ -272,14 +276,14 @@ class GameEngine(ShowBase):
             position = self.get_spawn_position()
             orientation = self.camera.getQuat()
             velocity = Vec3(0, 0, 0)
-            self.create_dynamic_voxel(position, velocity, orientation)
+            self.create_dynamic_voxel(position, velocity, orientation, self.selected_voxel_type)
 
-    def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Vec3, voxel_type: VoxelType = VoxelType.STONE):
+    def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Vec3, voxel_type: VoxelType):
         object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world)
         ccd = velocity.length() > 50
         self.object_manager.register_object(object, position, velocity, orientation, ccd)
 
-    def create_static_voxel(self, position: Vec3, voxel_type: VoxelType = VoxelType.STONE):
+    def create_static_voxel(self, position: Vec3, voxel_type: VoxelType):
         t0 = time.perf_counter()
         chunk_coordinates = calculate_world_chunk_coordinates(position, self.chunk_size, self.voxel_size)
         voxel_world = self.chunk_manager.get_voxel_world(chunk_coordinates)
@@ -312,12 +316,6 @@ class GameEngine(ShowBase):
             print("time create_geometry", t4-t3)
             print("time load_chunk", t5-t4)
             print()
-
-    def get_(self, chunk_coordinates, position): # not correct input
-        center_chunk_pos = calculate_chunk_world_position(chunk_coordinates, self.chunk_size, self.voxel_size)
-        ix = int((position.x - center_chunk_pos.x) / self.voxel_size)
-        iy = int((position.y - center_chunk_pos.y) / self.voxel_size)
-        iz = int((position.z + self.voxel_size) / self.voxel_size) - 1
     
     def manual_raycast_test(self):        
         raycast_result = self.cast_ray_from_camera(10000)
@@ -409,10 +407,8 @@ class GameEngine(ShowBase):
         orientation = self.camera.getQuat()
         direction = orientation.getForward()  # Get the forward direction of the camera
         velocity = direction * speed  # Adjust the speed as necessary
-        voxel_type = VoxelType.STONE # TODO: get by user selection
-        
         # Create and shoot the bullet
-        self.create_dynamic_voxel(position, velocity, orientation, voxel_type)
+        self.create_dynamic_voxel(position, velocity, orientation, self.selected_voxel_type)
 
     def visualize_normals(self, geom_node: NodePath, position: Vec2, scale: float = 0.5):
         """
@@ -491,6 +487,7 @@ class GameEngine(ShowBase):
 
         terrain_shape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
         terrain_node = BulletRigidBodyNode('Terrain')
+        terrain_node.setFriction(10)
         terrain_node.addShape(terrain_shape)
         terrain_np = self.render.attachNewNode(terrain_node)
 
