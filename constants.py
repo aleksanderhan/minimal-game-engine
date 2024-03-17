@@ -8,18 +8,9 @@ class VoxelType(Enum):
 
 voxel_type_map = {voxel_type.value: voxel_type for voxel_type in VoxelType}
 
-color_normal_map = {
-    (0, 1, 0): (1, 0, 0, 1), # red - front
-    (0, -1, 0): (0, 0, 1, 1), # blue  - back
-    (1, 0, 0): (1, 0, 1, 1), # magenta - right
-    (-1, 0, 0): (1, 1, 0, 1), # yellow -left
-    (0, 0, 1): (0, 1, 0, 1), # green - up
-    (0, 0, -1): (0, 1, 1, 1),  # cyan -down
-}
-
 material_properties = {
     VoxelType.PLACEHOLDER_BLOCK: {
-        "color": (0.47, 0.51, 0.51, 0.8),
+        "color": (0.5, 0.5, 0.8, 0.5),
         "mass": 0,
         "friction": 0,
         "coupling_strength": 0,

@@ -76,8 +76,8 @@ def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, vo
     voxel_center_y = grid_y * voxel_size
     voxel_center_z = grid_z * voxel_size - voxel_size / 2  # Adjust for top face at z=0
 
-    #if hit_normal == Vec3(0, 0, -1):
-    #    voxel_center_z += voxel_size
+    if hit_normal == Vec3(0, 0, -1):
+        voxel_center_z += voxel_size
 
     return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
 
