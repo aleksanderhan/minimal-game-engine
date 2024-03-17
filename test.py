@@ -410,3 +410,79 @@ _identify_chunks_to_load_and_unload(queue, loaded_chunks, player_chunk_coords)
 print("queue.scheduled end", [task.id for task in queue.scheduled])
 print("queue.queue end", [task.id for _, _, task in queue.queue])
 
+
+
+
+def identify_exposed_voxels0(voxel_array: np.ndarray) -> np.ndarray:
+    """
+    Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
+    True means it is exposed to air, False means it's not.
+
+    Parameters:
+        - world_array: a 3D numpy array representing the voxel types as integers in the world
+    """
+    # Pad the voxel world with zeros (air) on all sides
+    padded_world = np.pad(voxel_array, pad_width=1, mode='constant', constant_values=0)
+    
+    # Initialize a boolean array for exposed faces
+    exposed_faces = np.zeros_like(voxel_array, dtype=bool)
+    
+    # Check all six directions in a vectorized manner
+    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
+    
+    return exposed_faces
+
+import numba as nb
+
+@nb.jit(nopython=True, cache=True)
+def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
+    """
+    Identifies voxels exposed to air and returns a boolean array of the same shape as `voxel_array`
+    indicating exposure. True means the voxel is exposed to air, False means it's not.
+
+    Parameters:
+        - voxel_array: a 3D numpy array representing voxel types as integers in the world.
+    """
+    # Create a new array with padding of 1 around the original array
+    padded_shape = (voxel_array.shape[0] + 2, voxel_array.shape[1] + 2, voxel_array.shape[2] + 2)
+    padded_world = np.zeros(padded_shape, dtype=voxel_array.dtype)
+    
+    # Fill the inner part of the padded array with the original voxel data
+    padded_world[1:-1, 1:-1, 1:-1] = voxel_array
+    
+    # Initialize a boolean array for exposed faces
+    exposed_faces = np.zeros_like(voxel_array, dtype=np.bool_)
+
+    # Check all six directions
+    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
+    
+    return exposed_faces
+
+
+
+
+random_array = np.random.randint(0, 1, size=(100, 100, 100))
+
+print()
+
+t0 = time.perf_counter()
+identify_exposed_voxels0(random_array)
+t1 = time.perf_counter()
+identify_exposed_voxels(random_array)
+t2 = time.perf_counter()
+identify_exposed_voxels(random_array)
+t3 = time.perf_counter()
+
+print("identify_exposed_voxels0", t1-t0)
+print("identify_exposed_voxels", t2-t1)
+print("identify_exposed_voxels", t3-t2)

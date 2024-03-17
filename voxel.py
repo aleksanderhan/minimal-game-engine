@@ -1,6 +1,5 @@
 import numpy as np
 import uuid
-from functools import lru_cache
 
 from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape
 from panda3d.core import Vec3, LQuaternionf
@@ -9,8 +8,7 @@ from panda3d.core import TransformState, NodePath
 from panda3d.bullet import BulletWorld
 
 from constants import material_properties, VoxelType, voxel_type_map
-from utils import index_to_voxel_grid_coordinates
-from geom import create_mesh
+from jit import index_to_voxel_grid_coordinates, create_mesh
 
 
 class DynamicArbitraryVoxelObject:
@@ -62,7 +60,7 @@ class DynamicArbitraryVoxelObject:
             self.extend_array_uniformly()
         self.voxel_array[ix, iy, iz] = voxel_type.value
 
-        self.vertices, self.indices = create_object_mesh(self)
+        self.vertices, self.indices = create_mesh(object.voxel_array, object.voxel_size)
 
         body_indices = np.argwhere(self.voxel_array)
         parts = []
@@ -165,11 +163,10 @@ def create_dynamic_single_voxel_physics_node(object: DynamicArbitraryVoxelObject
 def create_single_voxel_mesh(voxel_type: VoxelType, voxel_size: float) -> tuple[np.ndarray, np.ndarray]:
     voxel_array = np.zeros((1, 1, 1), np.uint8)
     voxel_array[0, 0, 0] = voxel_type.value
-    return create_mesh(voxel_array, voxel_array, voxel_size)
+    return create_mesh(voxel_array, voxel_size)
 
 def create_object_mesh(object: DynamicArbitraryVoxelObject) -> tuple[np.ndarray, np.ndarray]:
-    exposed_voxels = identify_exposed_voxels(object.voxel_array)
-    return create_mesh(object.voxel_array, exposed_voxels, object.voxel_size)
+    return create_mesh(object.voxel_array, object.voxel_size)
 
 def noop_transform(face):
     return face
@@ -186,26 +183,6 @@ def rotate_face_90_degrees_ccw_around_y(face):
     # Rotate each point in the face 90 degrees counter-clockwise around the Y axis
     return [(z, y, -x) for x, y, z in face]
 
-def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
-    """
-    Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
-    True means it is exposed to air, False means it's not.
 
-    Parameters:
-        - world_array: a 3D numpy array representing the voxel types as integers in the world
-    """
-    # Pad the voxel world with zeros (air) on all sides
-    padded_world = np.pad(voxel_array, pad_width=1, mode='constant', constant_values=0)
-    
-    # Initialize a boolean array for exposed faces
-    exposed_faces = np.zeros_like(voxel_array, dtype=bool)
-    
-    # Check all six directions in a vectorized manner
-    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
-    
-    return exposed_faces
+
+

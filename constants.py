@@ -1,13 +1,13 @@
 from enum import Enum
 
 class VoxelType(Enum):
-    TRANCLUCENT = -1
+    PLACEHOLDER_BLOCK = -1
     AIR = 0
     STONE = 1
     GRASS = 2
 
 voxel_type_map = {
-    -1: VoxelType.TRANCLUCENT,
+    255: VoxelType.PLACEHOLDER_BLOCK,
     0: VoxelType.AIR,
     1: VoxelType.STONE,
     2: VoxelType.GRASS,
@@ -23,7 +23,7 @@ color_normal_map = {
 }
 
 material_properties = {
-    VoxelType.TRANCLUCENT: {
+    VoxelType.PLACEHOLDER_BLOCK: {
         "color": (0.47, 0.51, 0.51, 0.8),
         "mass": 0,
         "friction": 0,

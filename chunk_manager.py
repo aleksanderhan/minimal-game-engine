@@ -8,9 +8,9 @@ from typing import Any
 
 from direct.task import Task
 
-from voxel import identify_exposed_voxels
 from world import VoxelWorld, calculate_world_chunk_coordinates, create_voxel_world, calculate_distance_between_2d_points
-from geom import create_geometry, create_mesh 
+from geom import create_geometry
+from jit import create_mesh, identify_exposed_voxels
 
 
 class TaskWrapper:
@@ -89,7 +89,7 @@ class ChunkManager:
         self.tasks_actively_being_loaded: set[tuple[int, int]] = set()
 
         self.chunk_radius = 16
-        self.num_chunks = 4*int(3.14*self.chunk_radius**2)
+        self.num_chunks = 3*int(3.14*self.chunk_radius**2) # Total number of chunks before unloading begins
         self.batch_size = self.num_workers * 4
         print("num_chunks", self.num_chunks)
         print("batch_size", self.batch_size)
@@ -124,11 +124,8 @@ class ChunkManager:
                    vertices: np.ndarray,
                    indices: np.ndarray):
     
-        t0 = time.perf_counter()
         self.game_engine.create_and_apply_mesh_and_physics(coordinates, voxel_world, vertices, indices)
         self.loaded_chunks[coordinates] = voxel_world
-        #dt = time.perf_counter() - t0
-        #print("load_chunk", voxel_world.chunk_coord, "dt", dt)
     
     def _callback(self, data: tuple[tuple[int, int], VoxelWorld, np.ndarray, np.ndarray]):
         self.load_chunk(*data)
@@ -139,7 +136,7 @@ class ChunkManager:
         print('Worker error:', exc)
     
     def _load_closest_chunks(self, task: Task) -> int:
-        for _ in range(self.batch_size*2):
+        for _ in range(self.batch_size):
             load_task = self.load_queue.get()
             if load_task is not None:
                 # Check if the task is already loaded or in process.
@@ -167,15 +164,12 @@ class ChunkManager:
                 debug: bool) -> tuple[tuple[int, int], VoxelWorld, np.ndarray, np.ndarray]:
         
         # Generate the chunk and obtain both visual (terrain_np) and physics components (terrain_node)
-        t0 = time.perf_counter()
         voxel_world = create_voxel_world(chunk_size, max_height, coordinates, voxel_size)
         voxel_world.chunk_coord = coordinates
         
-        exposed_voxels = identify_exposed_voxels(voxel_world.world_array)
-        vertices, indices = create_mesh(voxel_world.world_array, exposed_voxels, voxel_size)
-        
+        vertices, indices = create_mesh(voxel_world.world_array, voxel_size)
         voxel_world.terrain_np = create_geometry(vertices, indices, debug=debug)
-        #dt = time.perf_counter() - t0
+
         return coordinates, voxel_world, vertices, indices
     
     def _identify_chunks_to_load_and_unload(self, task: Task) -> Task:

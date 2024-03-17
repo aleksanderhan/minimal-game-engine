@@ -30,16 +30,16 @@ from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
 from voxel import (
-    DynamicArbitraryVoxelObject, create_single_voxel_mesh, create_dynamic_single_voxel_object, identify_exposed_voxels,
+    DynamicArbitraryVoxelObject, create_single_voxel_mesh, create_dynamic_single_voxel_object,
 
 )
 from constants import VoxelType, voxel_type_map
 from world import (
     VoxelWorld, get_center_of_hit_static_voxel, get_center_of_hit_dynamic_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position
 )
-from geom import create_geometry, create_mesh
-from utils import toggle
-
+from geom import create_geometry
+from jit import voxel_grid_coordinates_to_index, index_to_voxel_grid_coordinates, identify_exposed_voxels, create_mesh
+from util import toggle
 
 random.seed(1337)
 
@@ -47,6 +47,13 @@ loadPrcFileData("", "load-file-type p3assimp")
 loadPrcFileData("", "bullet-enable-contact-events true")
 loadPrcFileData('', 'win-size 1680 1050')
 loadPrcFileData("", "threading-model Cull/Draw")
+
+def pre_warmup_jit_functions():
+    index_to_voxel_grid_coordinates(0, 0, 0, 5)
+    voxel_grid_coordinates_to_index(0, 0, 0, 5)
+    single_item_array = np.ones((1, 1, 1), np.uint8)
+    identify_exposed_voxels(single_item_array)
+    create_mesh(single_item_array, 1.0)
 
 
 class ObjectManager:
@@ -161,12 +168,7 @@ class GameEngine(ShowBase):
         print("selected_voxel_type_value", self.selected_voxel_type.name)
 
     def print_world_info(self):
-        t1 = time.perf_counter()
         num_surface_voxels = self.chunk_manager.get_number_of_visible_voxels()
-        t2 = time.perf_counter()
-        dt_num_surface_voxels = t2 - t1
-        print("dt_num_surface_voxels", dt_num_surface_voxels)
-
         num_chunks_loaded = len(list(self.chunk_manager.loaded_chunks))
         print("--- World info ---")
         print("Number of loaded chunks", num_chunks_loaded)
@@ -227,14 +229,8 @@ class GameEngine(ShowBase):
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
     def _create_translucent_voxel(self, position: Vec3) -> NodePath:
-        t0 = time.perf_counter()
-        voxel_type = voxel_type_map[self.selected_voxel_type_value]
-        vertices, indices = create_single_voxel_mesh(voxel_type, self.voxel_size)
-        t1 = time.perf_counter()
+        vertices, indices = create_single_voxel_mesh(VoxelType.PLACEHOLDER_BLOCK, self.voxel_size)
         cube = create_geometry(vertices, indices, debug=self.args.debug)
-        t2 = time.perf_counter()
-        print("create_single_voxel_mesh", t1- t0)
-        print("create_geometry", t2- t1)
 
         # Set the cube's scale and position
         #cube.setScale(self.voxel_size) # scale != voxel_size
@@ -299,8 +295,7 @@ class GameEngine(ShowBase):
         try:
             # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
-            exposed_voxels = identify_exposed_voxels(voxel_world.world_array)
-            vertices, indices = create_mesh(voxel_world.world_array, exposed_voxels, self.voxel_size)
+            vertices, indices = create_mesh(voxel_world.world_array, self.voxel_size)
             t3 = time.perf_counter()
             voxel_world.terrain_np = create_geometry(vertices, indices, debug=self.args.debug)
             t4 = time.perf_counter()
@@ -608,7 +603,7 @@ class GameEngine(ShowBase):
             self.camera.setH(self.camera.getH() - self.camera_rotate_speed * dt)
 
         return Task.cont
-
+    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -619,6 +614,8 @@ if __name__ == "__main__":
     parser.add_argument('--profile', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
     args = parser.parse_args()
+
+    pre_warmup_jit_functions()
 
     game = GameEngine(args)
     if args.debug or args.profile:

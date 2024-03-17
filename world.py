@@ -7,7 +7,7 @@ from panda3d.core import Vec3, Vec2, NodePath
 from panda3d.bullet import BulletClosestHitRayResult, BulletRigidBodyNode
 
 from constants import VoxelType, voxel_type_map
-from utils import voxel_grid_coordinates_to_index
+from jit import voxel_grid_coordinates_to_index
 
 
 class VoxelWorld:
