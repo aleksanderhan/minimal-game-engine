@@ -1,5 +1,7 @@
 import numpy as np
+import numba as nb
 import uuid
+import math
 from functools import lru_cache
 
 from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape
@@ -22,9 +24,9 @@ class DynamicArbitraryVoxelObject:
                  friction: float, 
                  name: str = "VoxelObject"):
         
-        self.root = self
-        self.parent = self.root
-        self.parent_position_relative_to_grid = Vec3(0, 0, 0)
+        #self.root = self
+        #self.parent = self.root
+        #self.parent_position_relative_to_grid = Vec3(0, 0, 0)
 
         self.voxel_array = voxel_array
         self.voxel_size = voxel_size
@@ -36,7 +38,7 @@ class DynamicArbitraryVoxelObject:
         self.mass = mass
         self.friction = friction
         
-        self.node_paths = {}
+        self.node_paths: dict[tuple[int, int, int], NodePath] = {}
 
     def get_offset(self) -> np.ndarray: # deprecated?
         return (np.array(self.voxel_array.shape) - 1) // 2
@@ -85,7 +87,9 @@ class DynamicArbitraryVoxelObject:
                 constraint.setParam(i, 0, 0) 
             game_engine.physics_world.attachConstraint(constraint)
 
-        return root_node_pos, orientation
+        velocity = root_node_path.node().getLinearVelocity()
+
+        return root_node_pos, velocity, orientation
 
     def extend_array_uniformly(self):
         # Specify the padding width of 1 for all sides of all dimensions
@@ -110,7 +114,20 @@ class DynamicArbitraryVoxelObject:
         root_node_path = self.node_paths[(0, 0, 0)]
         return root_node_path.getQuat()
     
-    
+    def set_velocity(self, velocity: Vec3):
+        for node_np in self.node_paths.values():
+            node = node_np.node()
+            node.setLinearVelocity(velocity)
+
+    def enable_ccd(self):
+        for node_np in self.node_paths.values():
+            node = node_np.node()
+            #voxel_diagonal = math.sqrt(3 * self.voxel_size**2)
+            ccd_radius = self.voxel_size / 2 #voxel_diagonal / 2
+            node.setCcdMotionThreshold(1e-7)
+            node.setCcdSweptSphereRadius(ccd_radius)
+
+
 class VoxelTools:        
 
     @staticmethod
@@ -213,6 +230,7 @@ class VoxelTools:
         return np.array(vertices, dtype=np.float32), np.array(indices, dtype=np.int32)
 
     @staticmethod
+    #@nb.jit(nopython=True)
     def check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[str]:
         max_i, max_j, max_k = array.shape[0] - 1, array.shape[1] - 1, array.shape[2] - 1
         exposed_faces = []
@@ -225,7 +243,7 @@ class VoxelTools:
         if k == 0 or array[i, j, k - 1] == 0: exposed_faces.append("down")
         
         return exposed_faces
-    
+
     @lru_cache
     @staticmethod
     def generate_face_vertices(ix: int, iy: int, iz: int, face_name: str, voxel_size: int):
@@ -268,7 +286,7 @@ class VoxelTools:
     def rotate_face_90_degrees_ccw_around_y(face):
         # Rotate each point in the face 90 degrees counter-clockwise around the Y axis
         return [(z, y, -x) for x, y, z in face]
-
+    
     @staticmethod
     def identify_exposed_voxels(world_array: np.ndarray) -> np.ndarray:
         """
@@ -281,11 +299,15 @@ class VoxelTools:
         # Pad the voxel world with zeros (air) on all sides
         padded_world = np.pad(world_array, pad_width=1, mode='constant', constant_values=0)
         
+        # Initialize a boolean array for exposed faces
         exposed_faces = np.zeros_like(world_array, dtype=bool)
         
-        for direction, (dx, dy, dz) in normals.items():
-            shifted_world = np.roll(padded_world, shift=(dx, dy, dz), axis=(0, 1, 2))
-            # Expose face if there's air next to it (voxel value of 0 in the shifted world)
-            exposed_faces |= ((shifted_world[1:-1, 1:-1, 1:-1] == 0) & (world_array > 0))
+        # Check all six directions in a vectorized manner
+        exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (world_array > 0))
+        exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (world_array > 0))
+        exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (world_array > 0))
+        exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (world_array > 0))
+        exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (world_array > 0))
+        exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (world_array > 0))
         
         return exposed_faces

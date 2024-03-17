@@ -1,5 +1,4 @@
-from functools import lru_cache
-
+import numba as nb
 
 # Toggle generator. Returns a or b alternatingly on next()
 def toggle(a, b, yield_a=True):
@@ -10,8 +9,8 @@ def toggle(a, b, yield_a=True):
 
 class IndexTools:
 
-    @lru_cache
     @staticmethod
+    #@nb.jit(nopython=True)
     def voxel_grid_coordinates_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[str]:
         """
         Convert world grid coordinates (ix, iy, iz) to array indices (i, j, k).
@@ -29,8 +28,8 @@ class IndexTools:
         k = iz # No change needed for z as it cannot be negative.
         return i, j, k
 
-    @lru_cache
     @staticmethod
+    #@nb.jit(nopython=True)
     def index_to_voxel_grid_coordinates(i: int, j: int, k: int , n: int) -> tuple[str]:
         """
         Convert array indices (i, j, k) back to world grid coordinates (ix, iy, iz).

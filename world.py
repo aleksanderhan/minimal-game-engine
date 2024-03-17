@@ -1,4 +1,5 @@
 import numpy as np
+import numba as nb
 import noise
 import math
 from functools import lru_cache
@@ -18,9 +19,7 @@ class VoxelWorld:
         self.voxel_size = voxel_size
         self.world_array = world_array
         self.chunk_coord: tuple[int, int] = None
-        
-        self.vertices: np.ndarray = None
-        self.indices: np.ndarray = None
+
         self.terrain_np: NodePath = None
         self.terrain_node: BulletRigidBodyNode = None
 
@@ -44,7 +43,11 @@ class VoxelWorld:
         i, j, k = IndexTools.voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         self.world_array[i, j, k] = voxel_type.value
 
-    def create_world_mesh(self):
+   
+class WorldTools:
+
+    @staticmethod
+    def create_world_mesh(world_array, voxel_size):
         """Efficiently creates mesh data for exposed voxel faces.
 
         Args:
@@ -56,7 +59,7 @@ class VoxelWorld:
             indices: A NumPy array of vertex indices, specifying how vertices are combined to form the triangular faces of the mesh.
         """
 
-        exposed_voxels = VoxelTools.identify_exposed_voxels(self.world_array)
+        exposed_voxels = VoxelTools.identify_exposed_voxels(world_array)
 
         vertices = []
         indices = []
@@ -65,20 +68,21 @@ class VoxelWorld:
         exposed_indices = np.argwhere(exposed_voxels)
         
         for i, j, k in exposed_indices:
-            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinates(i, j, k, self.world_array.shape[0])
-            exposed_faces = VoxelTools.check_surrounding_air(self.world_array, i, j, k)
+            ix, iy, iz = IndexTools.index_to_voxel_grid_coordinates(i, j, k, world_array.shape[0])
+            exposed_faces = VoxelTools.check_surrounding_air(world_array, i, j, k)
 
             for face_name, normal in normals.items():
                 if face_name in exposed_faces:
                     # Generate vertices for this face
-                    face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, self.voxel_size)
+                    face_vertices = VoxelTools.generate_face_vertices(ix, iy, iz, face_name, voxel_size)
                     face_normals = np.tile(np.array(normal), (4, 1))
 
-                    voxel_type = self.get_voxel_type(ix, iy, iz)
+                    i, j, k = IndexTools.voxel_grid_coordinates_to_index(ix, iy, iz, world_array.shape[0])
+                    voxel_type_value = world_array[i, j, k]
 
                     # Append generated vertices, normals, and texture coordinates to the list
                     for fv, fn in zip(face_vertices, face_normals):
-                        vertices.extend([*fv, *fn, voxel_type.value])
+                        vertices.extend([*fv, *fn, voxel_type_value])
                     
                     # Create indices for two triangles making up the face
                     indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
@@ -86,14 +90,12 @@ class VoxelWorld:
                     
                     index_counter += 4
 
-        self.vertices = np.array(vertices, dtype=np.float32)
-        self.indices = np.array(indices, dtype=np.int32)
-
-   
-class WorldTools:
-
+        vertices = np.array(vertices, dtype=np.float32)
+        indices = np.array(indices, dtype=np.int32)
+        return vertices, indices
+    
     @staticmethod
-    @lru_cache
+    #@nb.jit(nopython=True)
     def calculate_distance_between_2d_points(point1: tuple[int, int] | Vec2, point2: tuple[int, int] | Vec2) -> float:
         point1_x, point1_y = point1
         point2_x, point2_y = point2
@@ -153,8 +155,8 @@ class WorldTools:
         world_array = np.zeros((width, depth, max_height), dtype=int)
         
         # Generate or retrieve heightmap for this chunk
-        heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
-        #heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_coordinates)
+        #heightmap = WorldTools.generate_flat_height_map(chunk_size, height=1)
+        heightmap = WorldTools.generate_perlin_height_map(chunk_size, chunk_coordinates)
         
         # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
         height_levels = np.floor(heightmap).astype(int)
@@ -200,9 +202,9 @@ class WorldTools:
     @staticmethod
     def generate_perlin_height_map(chunk_size: int, chunk_coordinates: tuple[int, int]) -> np.ndarray:
         chunk_x, chunk_y = chunk_coordinates
-        scale = 0.05  # Adjust scale to control the "zoom" level of the noise
+        scale = 0.005  # Adjust scale to control the "zoom" level of the noise
         octaves = 4  # Number of layers of noise to combine
-        persistence = 0.5  # Amplitude of each octave
+        persistence = 2.5  # Amplitude of each octave
         lacunarity = 1.5  # Frequency of each octave
 
         height_map = np.zeros((chunk_size + 1, chunk_size + 1))
@@ -227,7 +229,7 @@ class WorldTools:
                                     base=0)  # Base can be any constant, adjust for different terrains
 
                 # Map the noise value to a desired height range if needed
-                height_map[x, y] = height * 25
+                height_map[x, y] = height * 70
 
         return height_map
     
@@ -239,7 +241,7 @@ class WorldTools:
         return np.full((adjusted_size, adjusted_size), height)
     
     @staticmethod
-    def calculate_chunk_world_position(coordinates: tuple[int, int], chunk_size: int, voxel_size: float) -> Vec2:
+    def calculate_chunk_world_position(chunk_coordinates: tuple[int, int], chunk_size: int, voxel_size: float) -> Vec2:
         """
         Calculates the world position of the chunk origo based on its grid coordinates.
 
@@ -251,7 +253,7 @@ class WorldTools:
         Returns:
         Vec2: The world position of the chunk.
         """
-        chunk_x, chunk_y = coordinates
+        chunk_x, chunk_y = chunk_coordinates
         x = chunk_x * chunk_size * voxel_size
         y = chunk_y * chunk_size * voxel_size
         return Vec2(x, y)

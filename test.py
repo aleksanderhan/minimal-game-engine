@@ -1,4 +1,10 @@
 import numpy as np
+import numba as nb
+import time
+import heapq
+from direct.stdpy.threading import RLock
+from typing import Any
+
 
 def identify_exposed_voxels(voxel_world):
     # Pad the voxel world with zeros (air) on all sides
@@ -163,156 +169,244 @@ def extend_array_uniformly(voxel_array):
 
 
 
+normals = {
+    'front':  ( 0,  1,  0),
+    'back':   (0,  -1,  0),
+    'right':  ( 1,  0,  0),
+    'left':   ( -1, 0,  0),
+    'up':   ( 0,  0, 1),
+    'down':     ( 0,  0,  -1),
+}
 
-import heapq
-from direct.stdpy.threading import Lock
+
+def identify_exposed_voxels0(world_array: np.ndarray) -> np.ndarray:
+    """
+    Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
+    True means it is exposed to air, False means it's not.
+
+    Parameters:
+        - world_array: a 3D numpy array representing the voxel types as integers in the world
+    """
+    # Pad the voxel world with zeros (air) on all sides
+    padded_world = np.pad(world_array, pad_width=1, mode='constant', constant_values=0)
+    
+    exposed_faces = np.zeros_like(world_array, dtype=bool)
+    
+    for direction, (dx, dy, dz) in normals.items():
+        shifted_world = np.roll(padded_world, shift=(dx, dy, dz), axis=(0, 1, 2))
+        # Expose face if there's air next to it (voxel value of 0 in the shifted world)
+        exposed_faces |= ((shifted_world[1:-1, 1:-1, 1:-1] == 0) & (world_array > 0))
+    
+    return exposed_faces
+
+def identify_exposed_voxels1(world_array: np.ndarray) -> np.ndarray:
+    """
+    Identifies a voxel exposed to air and returns a same shaped boolean np array with the result.
+    True means it is exposed to air, False means it's not.
+
+    Parameters:
+        - world_array: a 3D numpy array representing the voxel types as integers in the world
+    """
+    # Pad the voxel world with zeros (air) on all sides
+    padded_world = np.pad(world_array, pad_width=1, mode='constant', constant_values=0)
+    
+    # Initialize a boolean array for exposed faces
+    exposed_faces = np.zeros_like(world_array, dtype=bool)
+    
+    # Check all six directions in a vectorized manner
+    # Left (-x)
+    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (world_array > 0))
+    # Right (+x)
+    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (world_array > 0))
+    # Down (-y)
+    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (world_array > 0))
+    # Up (+y)
+    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (world_array > 0))
+    # Back (-z)
+    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (world_array > 0))
+    # Front (+z)
+    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (world_array > 0))
+    
+    return exposed_faces
+
+
+
+world_array = np.random.randint(0, 2, size=(500, 500, 500))
+
+t0 = time.perf_counter()
+res1 = identify_exposed_voxels0(world_array)
+t1 = time.perf_counter()
+res2 = identify_exposed_voxels1(world_array)
+t2 = time.perf_counter()
+print("identify_exposed_voxels0", t1 - t0)
+print("identify_exposed_voxels1", t2 - t1)
+assert np.array_equal(res1, res2)
+print()
+
+
 
 class TaskWrapper:
 
-    def __init__(self, task: tuple[int, int], priority: int):
-        self.task = task
+    def __init__(self, id: Any, priority: int):
+        self.id = id
         self.priority = priority
+
+    def __eq__(self, other) -> bool:
+        return self.id == other.id # Do not add: and self.priority == other.priority - because we use the method for checking if a task is in queue
+    
+    def __hash__(self) -> int:
+        return hash((self.id))
+
 
 class ReprioritizationQueue:
 
     def __init__(self):
-        self.queue: list[tuple[int, int, int]] = []
-        self.lock = Lock()
+        self.queue: list[TaskWrapper] = []
+        self.scheduled: set[TaskWrapper] = set()
+        self.lock = RLock()
         self.counter = 0
 
-    def put(self, task: tuple[int, int], priority: int):
+    def put(self, task: TaskWrapper):
+        print("put", task.id)
         with self.lock:
             self.counter += 1
-            wrapper = TaskWrapper(task, priority)
-            heapq.heappush(self.queue, (priority, self.counter, wrapper))
-
-    def get(self) -> tuple[int, int]:
+            self.scheduled.add(task)
+            heapq.heappush(self.queue, (task.priority, self.counter, task))
+    
+    def get(self) -> TaskWrapper | None:
         with self.lock:
             if not self.queue:
                 return None
-            _, _, wrapper = heapq.heappop(self.queue)
-            return wrapper.task
+            _, _, task = heapq.heappop(self.queue)
+            self.scheduled.remove(task)
+            return task
+    
+    def task_in_queue(self, task: TaskWrapper) -> bool:
+        return task in self.scheduled
 
-    def batch_change_priority1(self, wrapped_tasks: list[TaskWrapper]):
+    def batch_reprioritize_tasks(self, task_list: list[TaskWrapper]):
         with self.lock:
             # Create a mapping from task to new priority for quick lookup
-            new_priorities = {wrapper.task: wrapper.priority for wrapper in wrapped_tasks}
+            new_priorities = {task.id: task.priority for task in task_list}
 
             # Iterate over the queue and update priorities based on new_priorities
-            for i, (_, counter, wrapper) in enumerate(self.queue):
-                if wrapper.task in new_priorities:
+            for i, (_, counter, task) in enumerate(self.queue):
+                if task.id in new_priorities:
                     # Update priority directly in the queue
-                    self.queue[i] = (new_priorities[wrapper.task], counter, wrapper)
+                    self.queue[i] = (new_priorities[task.id], counter, task)
 
             # After updating the priorities in the queue, re-heapify to maintain the heap invariant
             heapq.heapify(self.queue)
 
-    def batch_change_priority2(self, wrapped_tasks: list[TaskWrapper]):
+    def batch_remove(self, tasks_to_remove: list[TaskWrapper]):
         with self.lock:
-            # Create a dictionary to map tasks to new priorities
-            priority_map = {wt.task: wt.priority for wt in wrapped_tasks}
-
-            # Create a new temporary list for storing updated elements
-            new_queue = []
-
-            # Iterate over the existing heap
-            for priority, counter, wrapper in self.queue:
-                if wrapper.task in priority_map:
-                    # Update the priority if necessary
-                    new_priority = priority_map[wrapper.task]
-                    new_queue.append((new_priority, counter, wrapper))
-                else:
-                    # Keep the element as is
-                    new_queue.append((priority, counter, wrapper))
-
-            # Replace the queue with the modified version
-            self.queue = new_queue
-            heapq.heapify(self.queue)  # Re-establish heap order
-
-    def batch_change_priority3(self, wrapped_tasks: list[TaskWrapper]):
-        with self.lock:
-            # Create a mapping from task to new priority for quick lookup
-            new_priorities = {wrapper.task: wrapper.priority for wrapper in wrapped_tasks}
-
-            # Iterate over the queue and update priorities based on new_priorities
-            for i, (_, counter, wrapper) in enumerate(self.queue):
-                if wrapper.task in new_priorities:
-                    # Update priority directly in the queue
-                    self.queue[i] = (new_priorities[wrapper.task], counter, wrapper)
-
-            # After updating the priorities in the queue, re-heapify to maintain the heap invariant
+            # Filter out the tasks to remove and rebuild the queue
+            self.queue = [(p, c, t) for p, c, t in self.queue if t not in tasks_to_remove]
+            for task_to_remove in tasks_to_remove:
+                self.scheduled.remove(task_to_remove)
             heapq.heapify(self.queue)
+                        
+
+def calculate_distance_between_2d_points(point1: tuple[int, int], point2: tuple[int, int]) -> float:
+    point1_x, point1_y = point1
+    point2_x, point2_y = point2
+    return ((point2_x - point1_x)**2 + (point2_y - point1_y)**2)**0.5
+
+def _identify_chunks_to_load_and_unload(load_queue, loaded_chunks, player_chunk_coords):
+    chunks_inside_radius: set[TaskWrapper] = set()
+    change_priority: list[TaskWrapper] = []
+
+    # Iterate over a square grid centered on the player to find chunks to load withing the chunk radius, centered on the player.
+    chunk_radius = 2
+    player_chunk_x, player_chunk_y = player_chunk_coords
+    for x in range(player_chunk_x - chunk_radius, player_chunk_x + chunk_radius + 1):
+        for y in range(player_chunk_y - chunk_radius, player_chunk_y + chunk_radius + 1):
+            coordinates = (x, y)
+            
+            distance_from_player = calculate_distance_between_2d_points(coordinates, player_chunk_coords)
+            if distance_from_player < chunk_radius: 
+                load_task = TaskWrapper(coordinates, distance_from_player)
+                chunks_inside_radius.add(load_task) # Add the chunks outside the radius, but inside the square
+                
+                if coordinates not in loaded_chunks:
+                    if load_task in load_queue.scheduled:
+                        change_priority.append(load_task)
+                    else:
+                        load_queue.put(load_task)
+
+    # Remove chunks scheduled for loading that are no longer within the chunk radius of the player
+    scheduled_for_loading_and_outside_chunk_radius = load_queue.scheduled - chunks_inside_radius
+    print("scheduled_for_loading_and_outside_chunk_radius", [task.id for task in scheduled_for_loading_and_outside_chunk_radius])
+    print("chunks_inside_radius", [task.id for task in chunks_inside_radius])
+
+    
+    load_queue.batch_reprioritize_tasks(change_priority)
+    load_queue.batch_remove(scheduled_for_loading_and_outside_chunk_radius)
+    # Reprioritize load tasks that have changed priority
 
 
 
 
-import time
 
-t0 = time.perf_counter()
 queue = ReprioritizationQueue()
 
-queue.put((1, 1), 1)
-queue.put((2, 2), 2)
-queue.put((3, 3), 3)
-queue.put((4, 4), 4)
-queue.put((5, 5), 5)
-queue.put((0, 0), 0)
+origin = TaskWrapper((0, 0), 0)
+front = TaskWrapper((0, 1), 1)
+left = TaskWrapper((-1, 0), 1)
+right = TaskWrapper((1, 0), 1)
+back = TaskWrapper((0, -1), 1)
+
+frontright = TaskWrapper((1, 1), 2**0.5)
+frontleft = TaskWrapper((1, -1), 2**0.5)
+backright = TaskWrapper((-1, 1), 2**0.5)
+backleft = TaskWrapper((-1, -1), 2**0.5)
+
+frontfront = TaskWrapper((0, 2), 2)
+leftleft = TaskWrapper((-2, 0), 2)
+rightright = TaskWrapper((2, 0), 2)
+backback = TaskWrapper((0, -2), 2)
 
 
-change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
-queue.batch_change_priority1(change_priority)
-first = queue.get()
-print("first", first)
-second = queue.get()
-print("second", second)
-third = queue.get()
-print("third", third)
-dt = time.perf_counter() - t0
-print(dt)
-print()
+loaded_chunks: dict[tuple[int, int], str] = {}
+loaded_chunks[origin.id] = "origin"
 
-t0 = time.perf_counter()
-queue = ReprioritizationQueue()
-
-queue.put((1, 1), 1)
-queue.put((2, 2), 2)
-queue.put((3, 3), 3)
-queue.put((4, 4), 4)
-queue.put((5, 5), 5)
-queue.put((0, 0), 0)
+loaded_chunks[frontfront.id] = "frontfront"
+loaded_chunks[leftleft.id] = "leftleft"
+loaded_chunks[rightright.id] = "rightright"
+loaded_chunks[backback.id] = "backback"
 
 
-change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
-queue.batch_change_priority2(change_priority)
-first = queue.get()
-print("first", first)
-second = queue.get()
-print("second", second)
-third = queue.get()
-print("third", third)
-dt = time.perf_counter() - t0
-print(dt)
-print()
 
-t0 = time.perf_counter()
-queue = ReprioritizationQueue()
+#queue.put(origin)
+queue.put(front)
+queue.put(left)
+queue.put(right)
+queue.put(back)
 
-queue.put((1, 1), 1)
-queue.put((2, 2), 2)
-queue.put((3, 3), 3)
-queue.put((4, 4), 4)
-queue.put((5, 5), 5)
-queue.put((0, 0), 0)
+queue.put(frontright)
+queue.put(frontleft)
+queue.put(backright)
+queue.put(backleft)
+
+queue.put(frontfront)
+queue.put(leftleft)
+queue.put(rightright)
+queue.put(backback)
 
 
-change_priority = [TaskWrapper((1, 1), 7), TaskWrapper((2, 2), 8)]
-queue.batch_change_priority3(change_priority)
-first = queue.get()
-print("first", first)
-second = queue.get()
-print("second", second)
-third = queue.get()
-print("third", third)
-dt = time.perf_counter() - t0
-print(dt)
-print()
+
+print("queue.scheduled before", [task.id for task in queue.scheduled])
+print("queue.queue before", [task.id for _, _, task in queue.queue])
+
+player_chunk_coords = (0, 0)
+_identify_chunks_to_load_and_unload(queue, loaded_chunks, player_chunk_coords)
+
+print("queue.scheduled after", [task.id for task in queue.scheduled])
+print("queue.queue after", [task.id for _, _, task in queue.queue])
+
+player_chunk_coords = (1, 0)
+_identify_chunks_to_load_and_unload(queue, loaded_chunks, player_chunk_coords)
+
+print("queue.scheduled end", [task.id for task in queue.scheduled])
+print("queue.queue end", [task.id for _, _, task in queue.queue])
+

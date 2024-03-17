@@ -5,3 +5,4 @@ noise
 numpy
 scipy
 Pmw
+numba

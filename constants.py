@@ -82,18 +82,18 @@ material_properties = {
         "color": (0, 0, 0, 0),
         "mass": 0,
         "friction": 0,
-        "coupling_strength": 0
+        "coupling_strength": 0,
     },
     VoxelType.STONE: {
         "color": (0.47, 0.51, 0.51, 0.5),
-        "mass": 10,
-        "friction": 100,
-        "coupling_strength": 1 
+        "mass": 50,
+        "friction": 200,
+        "coupling_strength": 1,
     },
     VoxelType.GRASS: {
         "color": (0.26, 0.87, 0.31, 0.5),
-        "mass": 2,
-        "friction": 2,
-        "coupling_strength": 0.5
+        "mass": 10,
+        "friction": 20,
+        "coupling_strength": 0.5,
     },
 }

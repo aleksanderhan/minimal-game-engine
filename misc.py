@@ -1,6 +1,7 @@
 import numpy as np
 from math import cos, sin, radians
 from direct.stdpy.threading import Lock
+from typing import Iterator
 
 from panda3d.core import (
     CardMaker, Vec3

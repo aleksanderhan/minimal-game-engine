@@ -9,7 +9,6 @@ from constants import material_properties, voxel_type_map
 
 class GeometryTools:
 
-    #@lru_cache # - unhashable type: 'numpy.ndarray'
     @staticmethod
     def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node", debug: bool = False) -> NodePath:
         vdata = GeomVertexData('voxel_data', GeometryTools.vertex_format_with_color(), Geom.UHStatic)
