@@ -9,6 +9,7 @@ from panda3d.bullet import BulletWorld
 
 from constants import material_properties, VoxelType, voxel_type_map
 from jit import index_to_voxel_grid_coordinates, create_mesh
+from util import create_voxel_type_value_color_list
 
 
 class DynamicArbitraryVoxelObject:
@@ -17,10 +18,11 @@ class DynamicArbitraryVoxelObject:
                  voxel_array: np.ndarray, 
                  voxel_size: float, 
                  vertices: np.ndarray, 
-                 indices: np.ndarray, 
+                 indices: np.ndarray,
                  mass: float, 
                  friction: float, 
-                 name: str = "VoxelObject"):
+                 name: str = "VoxelObject",
+                 debug: bool = False):
         
         #self.root = self
         #self.parent = self.root
@@ -31,6 +33,7 @@ class DynamicArbitraryVoxelObject:
         self.vertices = vertices
         self.indices = indices
         
+        self.debug = debug
         self.name = name
         self.id = str(uuid.uuid4())
         self.mass = mass
@@ -60,7 +63,8 @@ class DynamicArbitraryVoxelObject:
             self.extend_array_uniformly()
         self.voxel_array[ix, iy, iz] = voxel_type.value
 
-        self.vertices, self.indices = create_mesh(object.voxel_array, object.voxel_size)
+        voxel_type_value_color_list = create_voxel_type_value_color_list()
+        self.vertices, self.indices = create_mesh(object.voxel_array, object.voxel_size, voxel_type_value_color_list, self.debug)
 
         body_indices = np.argwhere(self.voxel_array)
         parts = []
@@ -126,9 +130,9 @@ class DynamicArbitraryVoxelObject:
             node.setCcdSweptSphereRadius(ccd_radius)
 
 
-def create_dynamic_single_voxel_object(voxel_size: int, voxel_type: VoxelType, render, physics_world) -> DynamicArbitraryVoxelObject:
+def create_dynamic_single_voxel_object(voxel_size: int, voxel_type: VoxelType, render, physics_world, debug: bool) -> DynamicArbitraryVoxelObject:
     voxel_array = np.ones((1, 1, 1), dtype=int)
-    vertices, indices = create_single_voxel_mesh(voxel_type, voxel_size)
+    vertices, indices = create_single_voxel_mesh(voxel_type, voxel_size, debug)
 
     mass = material_properties[voxel_type]["mass"]
     friction = material_properties[voxel_type]["friction"]
@@ -160,13 +164,15 @@ def create_dynamic_single_voxel_physics_node(object: DynamicArbitraryVoxelObject
     physics_world.attachRigidBody(node)
     return node_np
 
-def create_single_voxel_mesh(voxel_type: VoxelType, voxel_size: float) -> tuple[np.ndarray, np.ndarray]:
-    voxel_array = np.zeros((1, 1, 1), np.uint8)
+def create_single_voxel_mesh(voxel_type: VoxelType, voxel_size: float, debug: bool) -> tuple[np.ndarray, np.ndarray]:
+    voxel_array = np.zeros((1, 1, 1), np.int8)
     voxel_array[0, 0, 0] = voxel_type.value
-    return create_mesh(voxel_array, voxel_size)
+    voxel_type_value_color_list = create_voxel_type_value_color_list()
+    return create_mesh(voxel_array, voxel_size, voxel_type_value_color_list, debug)
 
 def create_object_mesh(object: DynamicArbitraryVoxelObject) -> tuple[np.ndarray, np.ndarray]:
-    return create_mesh(object.voxel_array, object.voxel_size)
+    voxel_type_value_color_list = create_voxel_type_value_color_list()
+    return create_mesh(object.voxel_array, object.voxel_size, voxel_type_value_color_list, object.debug)
 
 def noop_transform(face):
     return face

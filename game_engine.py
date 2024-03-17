@@ -40,7 +40,8 @@ from world import (
 )
 from geom import create_geometry
 from jit import voxel_grid_coordinates_to_index, index_to_voxel_grid_coordinates, identify_exposed_voxels, create_mesh
-from util import toggle
+from util import toggle, create_voxel_type_value_color_list
+
 
 random.seed(1337)
 
@@ -51,12 +52,13 @@ loadPrcFileData("", "threading-model Cull/Draw")
 
 def pre_warmup_jit_functions():
     print("Pre warming jit functions. Hold tight!")
-    single_item_array = np.ones((1, 1, 1), np.uint8)
+    single_item_array = np.ones((1, 1, 1), np.int8)
+    voxel_type_value_color_list = create_voxel_type_value_color_list()
     jit_functions = [
         lambda: index_to_voxel_grid_coordinates(0, 0, 0, 5),
         lambda: voxel_grid_coordinates_to_index(0, 0, 0, 5),
         lambda: identify_exposed_voxels(single_item_array),
-        lambda: create_mesh(single_item_array, 1.0),
+        lambda: create_mesh(single_item_array, 1.0, voxel_type_value_color_list, False),
     ]
 
     for f in tqdm.tqdm(jit_functions):
@@ -78,7 +80,7 @@ class ObjectManager:
         self.objects[object.id] = object
         root_node_path = object.node_paths[(0, 0, 0)]
 
-        geom_np = create_geometry(object.vertices, object.indices, debug=self.game_engine.args.debug)
+        geom_np = create_geometry(object.vertices, object.indices)
         geom_np.reparentTo(self.game_engine.render)
         geom_np.reparentTo(root_node_path)
 
@@ -237,8 +239,8 @@ class GameEngine(ShowBase):
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
     def _create_translucent_voxel(self, position: Vec3) -> NodePath:
-        vertices, indices = create_single_voxel_mesh(VoxelType.PLACEHOLDER_BLOCK, self.voxel_size)
-        cube = create_geometry(vertices, indices, debug=self.args.debug)
+        vertices, indices, = create_single_voxel_mesh(VoxelType.PLACEHOLDER_BLOCK, self.voxel_size, self.args.debug)
+        cube = create_geometry(vertices, indices)
 
         # Set the cube's scale and position
         #cube.setScale(self.voxel_size) # scale != voxel_size
@@ -249,9 +251,9 @@ class GameEngine(ShowBase):
         cube.setAlphaScale(0.5)  # Adjust this value as needed for desired transparency
         
         # Apply a material to the cube for a specific color
-        mat = Material()
-        mat.setDiffuse(VBase4(0.5, 0.5, 0.8, 0.5))  # RGBA, last value is the alpha
-        cube.setMaterial(mat, 1)
+        #mat = Material()
+        #mat.setDiffuse(VBase4(0.5, 0.5, 0.8, 0.5))  # RGBA, last value is the alpha
+        #cube.setMaterial(mat, 1)
 
         # Reparent the cube to render it in the scene
         cube.reparentTo(self.render)
@@ -283,7 +285,7 @@ class GameEngine(ShowBase):
             self.create_dynamic_voxel(position, velocity, orientation, self.selected_voxel_type)
 
     def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Vec3, voxel_type: VoxelType):
-        object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world)
+        object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world, self.args.debug)
         ccd = velocity.length() > 50
         self.object_manager.register_object(object, position, velocity, orientation, ccd)
 
@@ -303,9 +305,10 @@ class GameEngine(ShowBase):
         try:
             # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
-            vertices, indices = create_mesh(voxel_world.world_array, self.voxel_size)
+            voxel_type_value_color_list = create_voxel_type_value_color_list()
+            vertices, indices = create_mesh(voxel_world.world_array, self.voxel_size, voxel_type_value_color_list, self.args.debug)
             t3 = time.perf_counter()
-            voxel_world.terrain_np = create_geometry(vertices, indices, debug=self.args.debug)
+            voxel_world.terrain_np = create_geometry(vertices, indices)
             t4 = time.perf_counter()
             self.chunk_manager.load_chunk(chunk_coordinates, voxel_world, vertices, indices)
         except Exception as e:
@@ -477,9 +480,9 @@ class GameEngine(ShowBase):
         
         terrainMesh = BulletTriangleMesh()
         
-        # Loop through the indices to get triangles. Since vertices now include vertex_type
+        # Loop through the indices to get triangles
         for i in range(0, len(indices), 3):
-            idx0, idx1, idx2 = indices[i] * 7, indices[i+1] * 7, indices[i+2] * 7
+            idx0, idx1, idx2 = indices[i] * 10, indices[i+1] * 10, indices[i+2] * 10
             
             # Extract the position data from the flattened vertices array.
             v0 = vertices[idx0:idx0+3]  # Extracts x, y, z for vertex 0

@@ -1,15 +1,13 @@
 import numpy as np
-import numba as nb
+import time
 from functools import lru_cache
 
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
 
-from constants import material_properties, voxel_type_map
 
-
-def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node", debug: bool = False) -> NodePath:
-    num_vertices = len(vertices) // 7
+def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node") -> NodePath:
+    num_vertices = len(vertices) // 10
     vdata = GeomVertexData('voxel_data', _vertex_format_with_color(), Geom.UHStatic)
     vdata.uncleanSetNumRows(num_vertices)
 
@@ -17,17 +15,11 @@ def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom
     normal_writer = GeomVertexWriter(vdata, 'normal')
     color_writer = GeomVertexWriter(vdata, 'color')
 
-    # Precompute colors if possible
-    if debug:
-        color_values = [(v[3], v[4], v[5], 0.8) for v in vertices.reshape(-1, 7)]
-    else:
-        color_values = [material_properties[voxel_type_map[int(v[6])]]["color"] for v in vertices.reshape(-1, 7)]
-
-    for i, color in enumerate(color_values):
-        idx = i * 7
-        vertex_writer.addData3f(vertices[idx], vertices[idx+1], vertices[idx+2])
-        normal_writer.addData3f(vertices[idx+3], vertices[idx+4], vertices[idx+5])
-        color_writer.addData4f(*color)
+    for i in range(num_vertices):
+        base_idx = i * 10  # 3 for pos, 3 for normal, 4 for color = 10 components per vertex
+        vertex_writer.addData3f(vertices[base_idx], vertices[base_idx + 1], vertices[base_idx + 2])
+        normal_writer.addData3f(vertices[base_idx + 3], vertices[base_idx + 4], vertices[base_idx + 5])
+        color_writer.addData4f(vertices[base_idx + 6], vertices[base_idx + 7], vertices[base_idx + 8], vertices[base_idx + 9])
 
     # Create triangles using indices
     tris = GeomTriangles(Geom.UHStatic)
@@ -40,7 +32,7 @@ def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom
 
     geom_node = GeomNode(name)
     geom_node.addGeom(geom)
-
+    
     return NodePath(geom_node)
 
 @lru_cache
@@ -61,4 +53,5 @@ def _vertex_format_with_color() -> GeomVertexArrayFormat:
 
 
 if __name__ == "__main__":
-    
+    # Tests
+    pass

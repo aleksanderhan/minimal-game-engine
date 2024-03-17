@@ -11,6 +11,7 @@ from direct.task import Task
 from world import VoxelWorld, calculate_world_chunk_coordinates, create_voxel_world, calculate_distance_between_2d_points
 from geom import create_geometry
 from jit import create_mesh, identify_exposed_voxels
+from util import create_voxel_type_value_color_list
 
 
 class TaskWrapper:
@@ -167,8 +168,9 @@ class ChunkManager:
         voxel_world = create_voxel_world(chunk_size, max_height, coordinates, voxel_size)
         voxel_world.chunk_coord = coordinates
         
-        vertices, indices = create_mesh(voxel_world.world_array, voxel_size)
-        voxel_world.terrain_np = create_geometry(vertices, indices, debug=debug)
+        voxel_type_value_color_list = create_voxel_type_value_color_list()
+        vertices, indices = create_mesh(voxel_world.world_array, voxel_size, voxel_type_value_color_list, debug)
+        voxel_world.terrain_np = create_geometry(vertices, indices)
 
         return coordinates, voxel_world, vertices, indices
     

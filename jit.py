@@ -1,10 +1,13 @@
 import numpy as np
 import numba as nb
 
-
 @nb.jit(nopython=True, cache=True)
-def create_mesh(voxel_array: np.ndarray, voxel_size: float) -> tuple[np.ndarray, np.ndarray]:
-    """Efficiently creates mesh data for exposed voxel faces.
+def create_mesh(voxel_array: np.ndarray, 
+                voxel_size: float, 
+                voxel_type_value_color_list: list[tuple[float, float, float, float]],
+                debug: bool) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Efficiently creates mesh data for exposed voxel faces.
 
     Args:
         voxel_world: 3D NumPy array representing voxel types.
@@ -21,7 +24,7 @@ def create_mesh(voxel_array: np.ndarray, voxel_size: float) -> tuple[np.ndarray,
     exposed_voxels = identify_exposed_voxels(voxel_array)
     exposed_indices = np.argwhere(exposed_voxels)
 
-    normals: dict[str, tuple[int, int, int]] = {
+    normals: dict[tuple[int, int, int], tuple[float, float, float]] = {
         (0, 1, 0): np.array([ 0.0,  1.0,  0.0]), # front
         (0, -1, 0): np.array([ 0.0, -1.0,  0.0]), # back
         (1, 0, 0): np.array([ 1.0,  0.0,  0.0]), # right
@@ -42,10 +45,14 @@ def create_mesh(voxel_array: np.ndarray, voxel_size: float) -> tuple[np.ndarray,
                 # Generate normals for each face
                 face_normals = [normal for _ in range(4)] # 4 normals per face
                 voxel_type_value = voxel_array[i, j, k]
+                if debug:
+                    color = list(normal) + [0.8]
+                else:
+                    color = list(voxel_type_value_color_list[voxel_type_value + 1]) # Need to shift it by 1 to handle the VoxelType.PLACEHOLDER value of -1
 
                 # Append generated vertices, normals, and texture coordinates to the list
                 for fv, fn in zip(face_vertices, face_normals):
-                    vertices.extend([*fv, *fn, voxel_type_value])
+                    vertices.extend([*fv, *fn, *color])
 
                 # Create indices for two triangles making up the face
                 indices.extend([index_counter, index_counter + 1, index_counter + 2,  # First triangle
@@ -68,6 +75,35 @@ def _check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[tu
     if i == 0 or array[i - 1, j, k] == 0: exposed_faces.append((-1, 0, 0)) # left
     if k == max_k or array[i, j, k + 1] == 0: exposed_faces.append((0, 0, 1)) # up
     if k == 0 or array[i, j, k - 1] == 0: exposed_faces.append((0, 0, -1)) # down
+    
+    return exposed_faces
+
+@nb.jit(nopython=True, cache=True)
+def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
+    """
+    Identifies voxels exposed to air and returns a boolean array of the same shape as `voxel_array`
+    indicating exposure. True means the voxel is exposed to air, False means it's not.
+
+    Parameters:
+        - voxel_array: a 3D numpy array representing voxel types as integers in the world.
+    """
+    # Create a new array with padding of 1 around the original array
+    padded_shape = (voxel_array.shape[0] + 2, voxel_array.shape[1] + 2, voxel_array.shape[2] + 2)
+    padded_world = np.zeros(padded_shape, dtype=voxel_array.dtype)
+    
+    # Fill the inner part of the padded array with the original voxel data
+    padded_world[1:-1, 1:-1, 1:-1] = voxel_array
+    
+    # Initialize a boolean array for exposed faces
+    exposed_faces = np.zeros_like(voxel_array, dtype=np.bool_)
+
+    # Check all six directions
+    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
     
     return exposed_faces
 
@@ -136,31 +172,3 @@ def index_to_voxel_grid_coordinates(i: int, j: int, k: int , n: int) -> tuple[in
     
     return ix, iy, iz
 
-@nb.jit(nopython=True, cache=True)
-def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
-    """
-    Identifies voxels exposed to air and returns a boolean array of the same shape as `voxel_array`
-    indicating exposure. True means the voxel is exposed to air, False means it's not.
-
-    Parameters:
-        - voxel_array: a 3D numpy array representing voxel types as integers in the world.
-    """
-    # Create a new array with padding of 1 around the original array
-    padded_shape = (voxel_array.shape[0] + 2, voxel_array.shape[1] + 2, voxel_array.shape[2] + 2)
-    padded_world = np.zeros(padded_shape, dtype=voxel_array.dtype)
-    
-    # Fill the inner part of the padded array with the original voxel data
-    padded_world[1:-1, 1:-1, 1:-1] = voxel_array
-    
-    # Initialize a boolean array for exposed faces
-    exposed_faces = np.zeros_like(voxel_array, dtype=np.bool_)
-
-    # Check all six directions
-    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
-    
-    return exposed_faces

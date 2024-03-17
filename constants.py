@@ -6,12 +6,7 @@ class VoxelType(Enum):
     STONE = 1
     GRASS = 2
 
-voxel_type_map = {
-    255: VoxelType.PLACEHOLDER_BLOCK,
-    0: VoxelType.AIR,
-    1: VoxelType.STONE,
-    2: VoxelType.GRASS,
-}
+voxel_type_map = {voxel_type.value: voxel_type for voxel_type in VoxelType}
 
 color_normal_map = {
     (0, 1, 0): (1, 0, 0, 1), # red - front
@@ -30,7 +25,7 @@ material_properties = {
         "coupling_strength": 0,
     },
     VoxelType.AIR: {
-        "color": (0, 0, 0, 0),
+        "color": (0.0, 0.0, 0.0, 0.0),
         "mass": 0,
         "friction": 0,
         "coupling_strength": 0,
