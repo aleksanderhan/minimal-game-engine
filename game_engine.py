@@ -100,7 +100,7 @@ class GameEngine(ShowBase):
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 16
+        n = 32 # 16
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)

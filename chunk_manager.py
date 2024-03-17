@@ -37,9 +37,13 @@ class ReprioritizationQueue:
 
     def put(self, task: TaskWrapper):
         with self.lock:
-            self.counter += 1
-            self.scheduled.add(task)
-            heapq.heappush(self.queue, (task.priority, self.counter, task))
+            if task not in self.scheduled:
+                self.counter += 1
+                self.scheduled.add(task)
+                heapq.heappush(self.queue, (task.priority, self.counter, task))
+            else:
+                raise RuntimeError(f"Task {task.id} already in queue!")
+
     
     def get(self) -> TaskWrapper | None:
         with self.lock:
@@ -163,6 +167,10 @@ class ChunkManager:
         chunks_inside_radius: set[TaskWrapper] = set()
         change_priority: list[TaskWrapper] = []
 
+        # Freezing sets for deterministic iteration
+        loaded_chunks_coords: set[TaskWrapper]  = set(self.loaded_chunks.keys())
+        load_queue_scheduled: set[TaskWrapper]  = set(self.load_queue.scheduled)
+
         # Iterate over a square grid centered on the player to find chunks to load withing the chunk radius, centered on the player. 
         player_chunk_coords = self.get_player_chunk_coordinates()
         player_chunk_x, player_chunk_y = player_chunk_coords
@@ -175,18 +183,19 @@ class ChunkManager:
                     load_task = TaskWrapper(coordinates, distance_from_player)
                     chunks_inside_radius.add(load_task) # Add the chunks outside the radius, but inside the square
                     
-                    if coordinates not in self.loaded_chunks:
-                        if load_task in self.load_queue.scheduled:
+                    if coordinates not in loaded_chunks_coords:
+                        if load_task in load_queue_scheduled:
                             change_priority.append(load_task)
                         else:
                             self.load_queue.put(load_task)
 
+        # Reprioritize load tasks that have changed priority
+        self.load_queue.batch_reprioritize_tasks(change_priority) 
+
         # Remove chunks scheduled for loading that are no longer within the chunk radius of the player
-        scheduled_for_loading_and_outside_chunk_radius = self.load_queue.scheduled - chunks_inside_radius
+        scheduled_for_loading_and_outside_chunk_radius = load_queue_scheduled - chunks_inside_radius
         self.load_queue.batch_remove(scheduled_for_loading_and_outside_chunk_radius)
         
-        # Reprioritize load tasks that have changed priority
-        self.load_queue.batch_reprioritize_tasks(change_priority)        
 
         # Add chunks that are furthest away to unload queue
         '''
