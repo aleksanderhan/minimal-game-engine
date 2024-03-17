@@ -4,8 +4,6 @@ import argparse
 import copy
 import random
 import time
-import math
-from functools import lru_cache
 
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
@@ -19,24 +17,28 @@ from panda3d.core import (
     loadPrcFileData, GeomVertexReader, LQuaternionf
 )
 from panda3d.bullet import (
-    BulletWorld, BulletRigidBodyNode, BulletSphereShape,
+    BulletWorld, BulletRigidBodyNode,
     BulletTriangleMesh, BulletTriangleMeshShape, BulletClosestHitRayResult
 )
-from panda3d.bullet import BulletWorld, BulletSphereShape, BulletDebugNode
+from panda3d.bullet import BulletWorld, BulletDebugNode
 from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
 from panda3d.core import WindowProperties
 from panda3d.core import NodePath
 from panda3d.core import TransparencyAttrib, Material, VBase4
 from panda3d.core import Thread
-from panda3d.core import Spotlight, PerspectiveLens, Vec4
 
 from chunk_manager import ChunkManager
-from voxel import VoxelTools, DynamicArbitraryVoxelObject
-from constants import VoxelType, material_properties, voxel_type_map
-from world import VoxelWorld, WorldTools
-from geom import GeometryTools
-from misc_utils import toggle
+from voxel import (
+    DynamicArbitraryVoxelObject, create_single_voxel_mesh, create_dynamic_single_voxel_object, identify_exposed_voxels,
+
+)
+from constants import VoxelType, voxel_type_map
+from world import (
+    VoxelWorld, get_center_of_hit_static_voxel, get_center_of_hit_dynamic_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position
+)
+from geom import create_geometry, create_mesh
+from utils import toggle
 
 
 random.seed(1337)
@@ -62,7 +64,7 @@ class ObjectManager:
         self.objects[object.id] = object
         root_node_path = object.node_paths[(0, 0, 0)]
 
-        geom_np = GeometryTools.create_geometry(object.vertices, object.indices, debug=self.game_engine.args.debug)
+        geom_np = create_geometry(object.vertices, object.indices, debug=self.game_engine.args.debug)
         geom_np.reparentTo(self.game_engine.render)
         geom_np.reparentTo(root_node_path)
 
@@ -100,7 +102,7 @@ class GameEngine(ShowBase):
         self.ground_height = self.voxel_size / 2
         self.max_height = 50
 
-        n = 32 # 16
+        n = 16
         self.chunk_size = 2 * n - 1
 
         self.chunk_manager = ChunkManager(self)
@@ -108,7 +110,8 @@ class GameEngine(ShowBase):
         self.info_display = None
 
         self.build_mode = False
-        self.placeholder_cube = None
+        self.placeholder_cube: NodePath = None
+        self.selected_voxel_type_value = 0
         self.spawn_distance = 10
 
         self.camera.setPos(0, 0, 100)
@@ -136,10 +139,22 @@ class GameEngine(ShowBase):
         self.accept('g', self.toggle_gravity)
         self.accept('b', self.toggle_build_mode)
         self.accept('i', self.print_world_info)
+        self.accept('wheel_up', self.on_mouse_wheel_up)
+        
+        # Listen for mouse wheel down event
+        self.accept('wheel_down', self.on_mouse_wheel_down)
 
     def setup_environment(self):
         #build_robot(self.physics_world)
         pass
+
+    def on_mouse_wheel_up(self):
+        self.selected_voxel_type_value = (self.selected_voxel_type_value + 1) % len(VoxelType)
+        print("selected_voxel_type_value", self.selected_voxel_type_value)
+
+    def on_mouse_wheel_down(self):
+        self.selected_voxel_type_value = (self.selected_voxel_type_value - 1) % len(VoxelType)
+        print("selected_voxel_type_value", self.selected_voxel_type_value)
 
     def print_world_info(self):
         t1 = time.perf_counter()
@@ -160,7 +175,7 @@ class GameEngine(ShowBase):
             raycast_result = self.cast_ray_from_camera(self.spawn_distance)
 
             if raycast_result.hasHit():
-                voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
                 hit_normal = raycast_result.getHitNormal()
                 position = voxel_center_pos + hit_normal * self.voxel_size
             else:
@@ -183,13 +198,13 @@ class GameEngine(ShowBase):
                 hit_normal = raycast_result.getHitNormal()
 
                 if hit_node.static:
-                    voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                    voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
                     position = voxel_center_pos + hit_normal * self.voxel_size
                     orientation = LQuaternionf.identQuat()
                     self.placeholder_cube.setPos(position)
                     self.placeholder_cube.setQuat(orientation)
                 else:
-                    voxel_center_pos = WorldTools.get_center_of_hit_dynamic_voxel(raycast_result)
+                    voxel_center_pos = get_center_of_hit_dynamic_voxel(raycast_result)
                     hit_object = hit_node.getPythonTag("object")
                     position = voxel_center_pos + hit_normal * self.voxel_size
                     self.placeholder_cube.setPos(position)
@@ -207,10 +222,16 @@ class GameEngine(ShowBase):
         forward_vec = self.camera.getQuat().getForward()
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
-    def create_translucent_voxel(self, position: Vec3):
-        vertices, indices = VoxelTools.create_single_voxel_mesh(VoxelType.AIR, self.voxel_size)
-        cube = GeometryTools.create_geometry(vertices, indices, debug=self.args.debug)
-        
+    def create_translucent_voxel(self, position: Vec3) -> NodePath:
+        t0 = time.perf_counter()
+        voxel_type = voxel_type_map[self.selected_voxel_type_value]
+        vertices, indices = create_single_voxel_mesh(voxel_type, self.voxel_size)
+        t1 = time.perf_counter()
+        cube = create_geometry(vertices, indices, debug=self.args.debug)
+        t2 = time.perf_counter()
+        print("create_single_voxel_mesh", t1- t0)
+        print("create_geometry", t2- t1)
+
         # Set the cube's scale and position
         #cube.setScale(self.voxel_size) # scale != voxel_size
         cube.setPos(position)
@@ -238,13 +259,13 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.static:
-                voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
                 create_position = voxel_center_pos + hit_normal * self.voxel_size
                 self.create_static_voxel(create_position)
             else:
                 hit_object = hit_node.getPythonTag("object")
                 create_position, velocity, orientation = hit_object.add_voxel(hit_pos, hit_normal, VoxelType.STONE, self)
-                create_position = WorldTools.get_center_of_hit_dynamic_voxel(raycast_result) + hit_normal         
+                create_position = get_center_of_hit_dynamic_voxel(raycast_result) + hit_normal         
                 self.object_manager.update_object(hit_object, create_position, velocity, orientation)
         else:
             # place voxel in mid air
@@ -254,17 +275,17 @@ class GameEngine(ShowBase):
             self.create_dynamic_voxel(position, velocity, orientation)
 
     def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Vec3, voxel_type: VoxelType = VoxelType.STONE):
-        object = VoxelTools.crate_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world)
+        object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world)
         ccd = velocity.length() > 50
         self.object_manager.register_object(object, position, velocity, orientation, ccd)
 
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType = VoxelType.STONE):
         t0 = time.perf_counter()
-        chunk_coordinates = WorldTools.calculate_world_chunk_coordinates(position, self.chunk_size, self.voxel_size)
+        chunk_coordinates = calculate_world_chunk_coordinates(position, self.chunk_size, self.voxel_size)
         voxel_world = self.chunk_manager.get_voxel_world(chunk_coordinates)
         t1 = time.perf_counter()
 
-        center_chunk_pos = WorldTools.calculate_chunk_world_position(chunk_coordinates, self.chunk_size, self.voxel_size)
+        center_chunk_pos = calculate_chunk_world_position(chunk_coordinates, self.chunk_size, self.voxel_size)
         ix = int((position.x - center_chunk_pos.x) / self.voxel_size)
         iy = int((position.y - center_chunk_pos.y) / self.voxel_size)
         iz = int((position.z + self.voxel_size) / self.voxel_size)
@@ -274,21 +295,26 @@ class GameEngine(ShowBase):
         try:
             # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
-            vertices, indices = WorldTools.create_world_mesh(voxel_world.world_array, self.voxel_size)
-            voxel_world.terrain_np = GeometryTools.create_geometry(vertices, indices, debug=self.args.debug)
+            exposed_voxels = identify_exposed_voxels(voxel_world.world_array)
+            vertices, indices = create_mesh(voxel_world.world_array, exposed_voxels, self.voxel_size)
+            t3 = time.perf_counter()
+            voxel_world.terrain_np = create_geometry(vertices, indices, debug=self.args.debug)
+            t4 = time.perf_counter()
             self.chunk_manager.load_chunk(chunk_coordinates, voxel_world, vertices, indices)
         except Exception as e:
             print(e)
         finally:
-            t3 = time.perf_counter()
+            t5 = time.perf_counter()
             print("create_static_voxel:")
             print("time calculate_world_chunk_coordinates", t1-t0)
             print("time calculate_chunk_world_position", t2-t1)
-            print("time create_geometry", t3-t2)
+            print("time create_mesh", t3-t2)
+            print("time create_geometry", t4-t3)
+            print("time load_chunk", t5-t4)
             print()
 
     def get_(self, chunk_coordinates, position): # not correct input
-        center_chunk_pos = WorldTools.calculate_chunk_world_position(chunk_coordinates, self.chunk_size, self.voxel_size)
+        center_chunk_pos = calculate_chunk_world_position(chunk_coordinates, self.chunk_size, self.voxel_size)
         ix = int((position.x - center_chunk_pos.x) / self.voxel_size)
         iy = int((position.y - center_chunk_pos.y) / self.voxel_size)
         iz = int((position.z + self.voxel_size) / self.voxel_size) - 1
@@ -309,16 +335,16 @@ class GameEngine(ShowBase):
                 position = node_path.getPos()
                 print("ijk", ijk, "position", position)
 
-            voxel_center_pos = WorldTools.get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-            chunk_coord = WorldTools.calculate_world_chunk_coordinates(voxel_center_pos, self.chunk_size, self.voxel_size)
-            center_chunk_pos = WorldTools.calculate_chunk_world_position(chunk_coord, self.chunk_size, self.voxel_size)
+            voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+            chunk_coords = calculate_world_chunk_coordinates(voxel_center_pos, self.chunk_size, self.voxel_size)
+            center_chunk_pos = calculate_chunk_world_position(chunk_coords, self.chunk_size, self.voxel_size)
 
             info_text = f"""
                 Hit position: {hit_pos}
                 Hit normal: {hit_normal}
                 Hit voxel center: {voxel_center_pos}
                 Hit voxel static: {hit_node.static}
-                Hit chunk coord: {chunk_coord}
+                Hit chunk coords: {chunk_coords}
                 Hit chunk center pos: {center_chunk_pos}
             """
         else:
@@ -388,15 +414,15 @@ class GameEngine(ShowBase):
         # Create and shoot the bullet
         self.create_dynamic_voxel(position, velocity, orientation, voxel_type)
 
-    def visualize_normals(self, geom_node: NodePath, pos: Vec2, scale: float = 0.5):
+    def visualize_normals(self, geom_node: NodePath, position: Vec2, scale: float = 0.5):
         """
         Visualizes the normals of a geometry node, positioning them
         correctly based on the chunk's position in the world.
 
         Parameters:
-        - geom_node: The geometry node whose normals you want to visualize.
-        - chunk_x, chunk_y: The chunk's position in the grid/map.
-        - scale: The scale factor used for the visualization length of normals.
+            - geom_node: The geometry node whose normals you want to visualize.
+            - position: The chunk's position in the grid/map.
+            - scale: The scale factor used for the visualization length of normals.
         """
         lines_np = NodePath("normals_visualization")
         lines = LineSegs()
@@ -413,7 +439,7 @@ class GameEngine(ShowBase):
             n = normal_reader.getData3f()
 
             # Adjust local vertex position by chunk's world position
-            global_v = Vec3(local_v.getX() + pos.x, local_v.getY() + pos.y, local_v.getZ() + self.ground_height)
+            global_v = Vec3(local_v.getX() + position.x, local_v.getY() + position.y, local_v.getZ() + self.ground_height)
 
             # Calculate normal end point
             normal_end = global_v + n * scale * self.voxel_size
@@ -432,7 +458,7 @@ class GameEngine(ShowBase):
         terrain_np = voxel_world.terrain_np
         terrain_np.reparentTo(self.render)
 
-        world_pos = WorldTools.calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
+        world_pos = calculate_chunk_world_position(coordinates, self.chunk_size, self.voxel_size)
         terrain_np.setPos(world_pos.x, world_pos.y, self.ground_height)
 
         if self.args.debug:
