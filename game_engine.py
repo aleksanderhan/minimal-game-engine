@@ -14,7 +14,7 @@ from direct.gui.OnscreenImage import OnscreenImage
 
 from panda3d.core import (
     AmbientLight, DirectionalLight, KeyboardButton,
-    LineSegs, Material, TextNode, WindowProperties,
+    LineSegs, TextNode, WindowProperties,
     loadPrcFileData, GeomVertexReader, LQuaternionf
 )
 from panda3d.bullet import (
@@ -26,7 +26,7 @@ from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
 from panda3d.core import WindowProperties
 from panda3d.core import NodePath
-from panda3d.core import TransparencyAttrib, Material, VBase4
+from panda3d.core import TransparencyAttrib
 from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
@@ -116,10 +116,8 @@ class GameEngine(ShowBase):
         
         self.voxel_size = 0.25
         self.ground_height = self.voxel_size / 2
-        self.max_height = 50
-
-        n = 16
-        self.chunk_size = 2 * n - 1
+        self.max_height = args.n * 10
+        self.chunk_size = 2 * args.n - 1
 
         self.chunk_manager = ChunkManager(self)
         self.object_manager = ObjectManager(self)
@@ -576,6 +574,10 @@ class GameEngine(ShowBase):
         inputState.watchWithModifiers('rotateLeft', KeyboardButton.asciiKey('q'))
         inputState.watchWithModifiers('rotateRight', KeyboardButton.asciiKey('e'))
 
+    def get_player_chunk_coordinates(self) -> tuple[int, int]:
+        player_pos = self.camera.getPos()
+        return calculate_world_chunk_coordinates(player_pos, self.chunk_size, self.voxel_size)
+
     def move_camera_task(self, task: Task) -> int:
         dt = globalClock.getDt()
         
@@ -612,6 +614,8 @@ if __name__ == "__main__":
     parser.add_argument('--normals', action="store_true", default=False)
     parser.add_argument('--profile', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
+    parser.add_argument('-n', action="store", default=16, type=int)
+    parser.add_argument('-r', action="store", default=16, type=int)
     args = parser.parse_args()
 
     game = GameEngine(args)

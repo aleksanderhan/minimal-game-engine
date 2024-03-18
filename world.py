@@ -147,7 +147,7 @@ def generate_perlin_height_map(chunk_size: int, chunk_coordinates: tuple[int, in
     persistence = 2.5  # Amplitude of each octave
     lacunarity = 1.5  # Frequency of each octave
 
-    height_map = np.zeros((chunk_size + 1, chunk_size + 1))
+    height_map = np.zeros((chunk_size + 1, chunk_size + 1), dtype=np.int8)
 
     # Calculate global offsets
     global_offset_x = chunk_x * chunk_size

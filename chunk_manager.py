@@ -89,19 +89,15 @@ class ChunkManager:
         self.unload_queue = ReprioritizationQueue()
         self.tasks_actively_being_loaded: set[tuple[int, int]] = set()
 
-        self.chunk_radius = 16
+        self.chunk_radius = self.game_engine.args.r
         self.num_chunks = 3*int(3.14*self.chunk_radius**2) # Total number of chunks before unloading begins
         self.batch_size = self.num_workers * 4
         print("num_chunks", self.num_chunks)
         print("batch_size", self.batch_size)
 
         self.game_engine.taskMgr.doMethodLater(0.5, self._load_closest_chunks, "LoadClosestChunks")
-        #self.game_engine.taskMgr.doMethodLater(0.5, self._unload_chunk_furthest_away, "UnloadFurthestChunks")
+        self.game_engine.taskMgr.doMethodLater(0.5, self._unload_chunk_furthest_away, "UnloadFurthestChunks")
         self.game_engine.taskMgr.doMethodLater(0.5, self._identify_chunks_to_load_and_unload, "IdentifyChunksToLoadAndUnload")
-
-    def get_player_chunk_coordinates(self) -> tuple[int, int]:
-        player_pos = self.game_engine.camera.getPos()
-        return calculate_world_chunk_coordinates(player_pos, self.game_engine.chunk_size, self.game_engine.voxel_size)
 
     def get_voxel_world(self, chunk_coordinates: tuple[int, int]) -> VoxelWorld:
         return self.loaded_chunks.get(chunk_coordinates)
@@ -176,14 +172,16 @@ class ChunkManager:
     
     def _identify_chunks_to_load_and_unload(self, task: Task) -> Task:
         chunks_inside_radius: set[TaskWrapper] = set()
-        change_priority: list[TaskWrapper] = []
+        load_queue_change_priority: list[TaskWrapper] = []
+        unload_queue_change_priority: list[TaskWrapper] = []
 
         # Freezing sets for deterministic iteration
-        loaded_chunks_coords: set[TaskWrapper]  = set(self.loaded_chunks.keys())
-        load_queue_scheduled: set[TaskWrapper]  = set(self.load_queue.scheduled)
+        loaded_chunks_coords = set(self.loaded_chunks.keys())
+        load_queue_scheduled = set(self.load_queue.scheduled)
+        unload_queue_scheduled = set(self.unload_queue.scheduled)
 
         # Iterate over a square grid centered on the player to find chunks to load withing the chunk radius, centered on the player. 
-        player_chunk_coords = self.get_player_chunk_coordinates()
+        player_chunk_coords = self.game_engine.get_player_chunk_coordinates()
         player_chunk_x, player_chunk_y = player_chunk_coords
         for x in range(player_chunk_x - self.chunk_radius, player_chunk_x + self.chunk_radius + 1):
             for y in range(player_chunk_y - self.chunk_radius, player_chunk_y + self.chunk_radius + 1):
@@ -196,39 +194,47 @@ class ChunkManager:
                     
                     if coordinates not in loaded_chunks_coords:
                         if load_task in load_queue_scheduled:
-                            change_priority.append(load_task)
+                            load_queue_change_priority.append(load_task)
                         else:
                             self.load_queue.put(load_task)
 
         # Reprioritize load tasks that have changed priority
-        self.load_queue.batch_reprioritize_tasks(change_priority) 
+        self.load_queue.batch_reprioritize_tasks(load_queue_change_priority) 
 
         # Remove chunks scheduled for loading that are no longer within the chunk radius of the player
         scheduled_for_loading_and_outside_chunk_radius = load_queue_scheduled - chunks_inside_radius
         self.load_queue.batch_remove(scheduled_for_loading_and_outside_chunk_radius)
 
-        '''
         # Add chunks that are outside chunk radius to unload queue
         chunks_inside_radius_coordinates = set([task.id for task in chunks_inside_radius])
-        loaded_and_outside_chunk_radius = set(self.loaded_chunks.keys()) - chunks_inside_radius_coordinates
+        loaded_and_outside_chunk_radius = loaded_chunks_coords - chunks_inside_radius_coordinates
         for coordinates in loaded_and_outside_chunk_radius:
             distance_from_player = calculate_distance_between_2d_points(coordinates, player_chunk_coords)
             unload_taks = TaskWrapper(coordinates, -distance_from_player)
-            self.unload_queue.put(unload_taks)
-        '''
+            if unload_taks not in unload_queue_scheduled:
+                self.unload_queue.put(unload_taks)
+            else:
+                unload_queue_change_priority.append(unload_taks)
+
+        # Reprioritize unload tasks
+        self.unload_queue.batch_reprioritize_tasks(unload_queue_change_priority)
+
+        # Remove chunks scheduled for unloading that are now within the chunk radius
+        chunks_scheduled_for_unloading_and_inside_chunk_radius = unload_queue_scheduled & chunks_inside_radius
+        self.unload_queue.batch_remove(chunks_scheduled_for_unloading_and_inside_chunk_radius)
 
         return Task.again
     
     def _unload_chunk_furthest_away(self, task: Task) -> int:
         num_chunks_to_unload = len(self.loaded_chunks) - self.num_chunks
         for _ in range(num_chunks_to_unload):
-            unload_tqask = self.unload_queue.get()
-            if unload_tqask:
-                self._unload_chunk(unload_tqask)
+            unload_task = self.unload_queue.get()
+            if unload_task:
+                self._unload_chunk(unload_task)
         return Task.again
 
-    def _unload_chunk(self, unload_tqask: TaskWrapper):
-        voxel_world = self.loaded_chunks.pop(unload_tqask.id, None)
+    def _unload_chunk(self, unload_task: TaskWrapper):
+        voxel_world = self.loaded_chunks.pop(unload_task.id, None)
         if voxel_world:
             voxel_world.terrain_np.removeNode()
             self.game_engine.physics_world.removeRigidBody(voxel_world.terrain_node)

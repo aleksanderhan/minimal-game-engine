@@ -24,7 +24,7 @@ def create_mesh(voxel_array: np.ndarray,
     exposed_voxels = identify_exposed_voxels(voxel_array)
     exposed_indices = np.argwhere(exposed_voxels)
 
-    normals: dict[tuple[int, int, int], tuple[float, float, float]] = {
+    normals = {
         (0, 1, 0): np.array([ 0.0,  1.0,  0.0]), # front
         (0, -1, 0): np.array([ 0.0, -1.0,  0.0]), # back
         (1, 0, 0): np.array([ 1.0,  0.0,  0.0]), # right
@@ -65,20 +65,6 @@ def create_mesh(voxel_array: np.ndarray,
     return vertices, indices
 
 @nb.jit(nopython=True, cache=True)
-def _check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[tuple[int, int]]:
-    max_i, max_j, max_k = array.shape[0] - 1, array.shape[1] - 1, array.shape[2] - 1
-    exposed_faces = []
-    
-    if j == max_j or array[i, j + 1, k] == 0: exposed_faces.append((0, 1, 0)) # front
-    if j == 0 or array[i, j - 1, k] == 0: exposed_faces.append((0, -1, 0)) # back
-    if i == max_i or array[i + 1, j, k] == 0: exposed_faces.append((1, 0, 0)) # right
-    if i == 0 or array[i - 1, j, k] == 0: exposed_faces.append((-1, 0, 0)) # left
-    if k == max_k or array[i, j, k + 1] == 0: exposed_faces.append((0, 0, 1)) # up
-    if k == 0 or array[i, j, k - 1] == 0: exposed_faces.append((0, 0, -1)) # down
-    
-    return exposed_faces
-
-@nb.jit(nopython=True, cache=True)
 def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
     """
     Identifies voxels exposed to air and returns a boolean array of the same shape as `voxel_array`
@@ -106,34 +92,6 @@ def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
     exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
     
     return exposed_faces
-
-@nb.jit(nopython=True, cache=True)
-def _generate_face_vertices(ix: int, iy: int, iz: int, face_id: tuple[int, int, int], voxel_size: int) -> np.ndarray:
-    """
-    Generates vertices and normals for a given voxel face.
-
-    Args:
-        ix, iy, iz: coordinates of the voxel in the voxel grid.
-        face_name: The face to be generated
-        voxel_size: Size of the voxel.
-
-    Returns:
-        face_vertices: A list of vertex positions for the face.
-    """
-    face_offsets: dict[tuple[int, int, int], np.ndarray] = {
-        (0, 1, 0): np.array([(-0.5, 0.5, -0.5), (-0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0.5, 0.5, -0.5)]),
-        (0, -1, 0): np.array([(0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (-0.5, -0.5, -0.5)]),
-        (1, 0, 0): np.array([(0.5, -0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (0.5, -0.5, 0.5)]),
-        (-1, 0, 0): np.array([(-0.5, 0.5, -0.5), (-0.5, -0.5, -0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, 0.5)]),
-        (0, 0, 1): np.array([(-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]),
-        (0, 0, -1): np.array([(-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0.5, -0.5, -0.5), (-0.5, -0.5, -0.5)]),
-    }[face_id]
-
-    # Calculate the center position of the voxel in world coordinates
-    center_position = np.array([ix, iy, iz]) * voxel_size
-
-    # Then, for each face, adjust the vertices based on this center position
-    return center_position + (face_offsets * voxel_size)
 
 @nb.jit(nopython=True, cache=True)
 def voxel_grid_coordinates_to_index(ix: int, iy: int, iz: int, n: int) -> tuple[int, int, int]:
@@ -171,4 +129,46 @@ def index_to_voxel_grid_coordinates(i: int, j: int, k: int , n: int) -> tuple[in
     iz = k # No change needed for z as it cannot be negative.
     
     return ix, iy, iz
+
+@nb.jit(nopython=True, cache=True)
+def _generate_face_vertices(ix: int, iy: int, iz: int, face_id: tuple[int, int, int], voxel_size: int) -> np.ndarray:
+    """
+    Generates vertices and normals for a given voxel face.
+
+    Args:
+        ix, iy, iz: coordinates of the voxel in the voxel grid.
+        face_name: The face to be generated
+        voxel_size: Size of the voxel.
+
+    Returns:
+        face_vertices: A list of vertex positions for the face.
+    """
+    face_offsets: dict[tuple[int, int, int], np.ndarray] = {
+        (0, 1, 0): np.array([(-0.5, 0.5, -0.5), (-0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0.5, 0.5, -0.5)]),
+        (0, -1, 0): np.array([(0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5), (-0.5, -0.5, -0.5)]),
+        (1, 0, 0): np.array([(0.5, -0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5), (0.5, -0.5, 0.5)]),
+        (-1, 0, 0): np.array([(-0.5, 0.5, -0.5), (-0.5, -0.5, -0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, 0.5)]),
+        (0, 0, 1): np.array([(-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]),
+        (0, 0, -1): np.array([(-0.5, 0.5, -0.5), (0.5, 0.5, -0.5), (0.5, -0.5, -0.5), (-0.5, -0.5, -0.5)]),
+    }[face_id]
+
+    # Calculate the center position of the voxel in world coordinates
+    center_position = np.array([ix, iy, iz]) * voxel_size
+
+    # Then, for each face, adjust the vertices based on this center position
+    return center_position + (face_offsets * voxel_size)
+
+@nb.jit(nopython=True, cache=True)
+def _check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[tuple[int, int]]:
+    max_i, max_j, max_k = array.shape[0] - 1, array.shape[1] - 1, array.shape[2] - 1
+    exposed_faces = []
+    
+    if j == max_j or array[i, j + 1, k] == 0: exposed_faces.append((0, 1, 0)) # front
+    if j == 0 or array[i, j - 1, k] == 0: exposed_faces.append((0, -1, 0)) # back
+    if i == max_i or array[i + 1, j, k] == 0: exposed_faces.append((1, 0, 0)) # right
+    if i == 0 or array[i - 1, j, k] == 0: exposed_faces.append((-1, 0, 0)) # left
+    if k == max_k or array[i, j, k + 1] == 0: exposed_faces.append((0, 0, 1)) # up
+    if k == 0 or array[i, j, k - 1] == 0: exposed_faces.append((0, 0, -1)) # down
+    
+    return exposed_faces
 

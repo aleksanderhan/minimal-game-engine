@@ -32,7 +32,7 @@ def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom
 
     geom_node = GeomNode(name)
     geom_node.addGeom(geom)
-    
+
     return NodePath(geom_node)
 
 @lru_cache
@@ -49,9 +49,3 @@ def _vertex_format_with_color() -> GeomVertexArrayFormat:
     vertex_format = GeomVertexFormat.registerFormat(vertex_format)
 
     return vertex_format
-
-
-
-if __name__ == "__main__":
-    # Tests
-    pass
