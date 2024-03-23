@@ -1,10 +1,19 @@
 import numpy as np
-import time
 from functools import lru_cache
 
 from panda3d.core import GeomVertexFormat, GeomVertexArrayFormat, GeomVertexData
 from panda3d.core import GeomVertexWriter, GeomTriangles, Geom, GeomNode, NodePath
 
+from jit import _create_mesh
+from util import create_voxel_type_value_color_list
+
+
+def create_mesh(voxel_array: np.ndarray, 
+                voxel_size: float,
+                debug: bool) -> tuple[np.ndarray, np.ndarray]:
+    
+    voxel_type_value_color_list = create_voxel_type_value_color_list()
+    return _create_mesh(voxel_array, voxel_size, voxel_type_value_color_list, debug)    
 
 def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node") -> NodePath:
     num_vertices = len(vertices) // 10
@@ -23,6 +32,7 @@ def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom
 
     # Create triangles using indices
     tris = GeomTriangles(Geom.UHStatic)
+    tris.reserve_num_vertices(len(indices))
     for i in range(0, len(indices), 3):
         tris.addVertices(indices[i], indices[i+1], indices[i+2])
     tris.closePrimitive()

@@ -1,8 +1,9 @@
 import numpy as np
 import numba as nb
 
+
 @nb.jit(nopython=True, cache=True)
-def create_mesh(voxel_array: np.ndarray, 
+def _create_mesh(voxel_array: np.ndarray, 
                 voxel_size: float, 
                 voxel_type_value_color_list: list[tuple[float, float, float, float]],
                 debug: bool) -> tuple[np.ndarray, np.ndarray]:
@@ -10,8 +11,10 @@ def create_mesh(voxel_array: np.ndarray,
     Efficiently creates mesh data for exposed voxel faces.
 
     Args:
-        voxel_world: 3D NumPy array representing voxel types.
+        voxel_array: 3D NumPy array representing voxel types.
         voxel_size: The size of each voxel in world units.
+        voxel_type_value_color_list: list of colors for each voxel type
+        debug: debug flag
 
     Returns:
         vertices: A NumPy array of vertices where each group of six numbers represents the x, y, z coordinates of a vertex and its normal (nx, ny, nz) and color
@@ -84,12 +87,12 @@ def identify_exposed_voxels(voxel_array: np.ndarray) -> np.ndarray:
     exposed_faces = np.zeros_like(voxel_array, dtype=np.bool_)
 
     # Check all six directions
-    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array > 0))
-    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array > 0))
+    exposed_faces |= ((padded_world[:-2, 1:-1, 1:-1] == 0) & (voxel_array != 0))
+    exposed_faces |= ((padded_world[2:, 1:-1, 1:-1] == 0) & (voxel_array != 0))
+    exposed_faces |= ((padded_world[1:-1, :-2, 1:-1] == 0) & (voxel_array != 0))
+    exposed_faces |= ((padded_world[1:-1, 2:, 1:-1] == 0) & (voxel_array != 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, :-2] == 0) & (voxel_array != 0))
+    exposed_faces |= ((padded_world[1:-1, 1:-1, 2:] == 0) & (voxel_array != 0))
     
     return exposed_faces
 
@@ -171,4 +174,3 @@ def _check_surrounding_air(array: np.ndarray, i: int, j: int, k: int) -> list[tu
     if k == 0 or array[i, j, k - 1] == 0: exposed_faces.append((0, 0, -1)) # down
     
     return exposed_faces
-

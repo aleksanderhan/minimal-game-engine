@@ -8,10 +8,9 @@ from typing import Any
 
 from direct.task import Task
 
-from world import VoxelWorld, calculate_world_chunk_coordinates, create_voxel_world, calculate_distance_between_2d_points
-from geom import create_geometry
-from jit import create_mesh, identify_exposed_voxels
-from util import create_voxel_type_value_color_list
+from world import VoxelWorld, create_voxel_world, calculate_distance_between_2d_points
+from geom import create_geometry, create_mesh
+from jit import identify_exposed_voxels
 
 
 class TaskWrapper:
@@ -27,7 +26,7 @@ class TaskWrapper:
         return hash((self.id))
 
 
-class ReprioritizationQueue:
+class RePriorityQueue:
 
     def __init__(self):
         self.queue: list[tuple[float, int, TaskWrapper]] = []
@@ -85,8 +84,8 @@ class ChunkManager:
 
         self.num_workers = math.ceil(os.cpu_count() / 4)
         self.pool = Pool(processes=self.num_workers)
-        self.load_queue = ReprioritizationQueue()
-        self.unload_queue = ReprioritizationQueue()
+        self.load_queue = RePriorityQueue()
+        self.unload_queue = RePriorityQueue()
         self.tasks_actively_being_loaded: set[tuple[int, int]] = set()
 
         self.chunk_radius = self.game_engine.args.r
@@ -101,12 +100,6 @@ class ChunkManager:
 
     def get_voxel_world(self, chunk_coordinates: tuple[int, int]) -> VoxelWorld:
         return self.loaded_chunks.get(chunk_coordinates)
-    
-    def get_number_of_loaded_vertices(self) -> int:
-        result = 0
-        for voxel_world in list(self.loaded_chunks.values()):
-            result += len(voxel_world.vertices)
-        return result
     
     def get_number_of_visible_voxels(self) -> int:
         result = 0
@@ -164,8 +157,7 @@ class ChunkManager:
         voxel_world = create_voxel_world(chunk_size, max_height, coordinates, voxel_size)
         voxel_world.chunk_coord = coordinates
         
-        voxel_type_value_color_list = create_voxel_type_value_color_list()
-        vertices, indices = create_mesh(voxel_world.world_array, voxel_size, voxel_type_value_color_list, debug)
+        vertices, indices = create_mesh(voxel_world.world_array, voxel_size, debug)
         voxel_world.terrain_np = create_geometry(vertices, indices)
 
         return coordinates, voxel_world, vertices, indices

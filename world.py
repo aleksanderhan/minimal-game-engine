@@ -3,8 +3,8 @@ import noise
 import math
 from functools import lru_cache
 
-from panda3d.core import Vec3, Vec2, NodePath
-from panda3d.bullet import BulletClosestHitRayResult, BulletRigidBodyNode
+from panda3d.core import Vec3, Vec2, NodePath, Quat
+from panda3d.bullet import BulletRigidBodyNode
 
 from constants import VoxelType, voxel_type_map
 from jit import voxel_grid_coordinates_to_index
@@ -47,19 +47,18 @@ def calculate_distance_between_2d_points(point1: tuple[int, int] | Vec2, point2:
     point2_x, point2_y = point2
     return ((point2_x - point1_x)**2 + (point2_y - point1_y)**2)**0.5
 
-def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, voxel_size: float) -> Vec3:
+def get_center_of_hit_static_voxel(hit_pos: Vec3, hit_normal: Vec3, voxel_size: float) -> Vec3:
     """
     Identifies the voxel hit by a raycast and returns its center position in world space.
     
     Parameters:
-    - raycast_result: The raycast object with a hit.
+    - hit_pos: The position of the hit.
+    - hit_normal: The normal vector to the face that was hit.
     - voxel_size: The size of a voxel.
     
     Returns:
     - Vec3: The center position of the hit voxel in world space.
     """
-    hit_pos = raycast_result.getHitPos()
-    hit_normal = raycast_result.getHitNormal()
 
     # Nudge the hit position slightly towards the opposite direction of the normal
     # This helps ensure the hit position is always considered within the voxel, even near edges
@@ -81,8 +80,7 @@ def get_center_of_hit_static_voxel(raycast_result: BulletClosestHitRayResult, vo
 
     return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
 
-def get_center_of_hit_dynamic_voxel(raycast_result: BulletClosestHitRayResult) -> Vec3:
-    hit_node = raycast_result.getNode()
+def get_center_of_hit_dynamic_voxel(hit_node: BulletRigidBodyNode) -> Vec3:
     hit_object = hit_node.getPythonTag("object")
     ijk = hit_node.getPythonTag("ijk")
 
@@ -125,7 +123,7 @@ def create_voxel_world(chunk_size: int, max_height: int, chunk_coordinates: tupl
     voxel_world = VoxelWorld(world_array, voxel_size)
 
     '''    
-    if coordinates == (0, 0):
+    if chunk_coordinates == (0, 0):
         voxel_world.set_voxel(0, 0, 1, VoxelType.GRASS)
     voxel_world.set_voxel(0, 0, 0, VoxelType.STONE)
     voxel_world.set_voxel(1, 0, 0, VoxelType.STONE)
@@ -221,3 +219,58 @@ def calculate_world_chunk_coordinates(position: Vec2, chunk_size: int, voxel_siz
     chunk_y = math.floor(adjusted_pos_y / (chunk_size * voxel_size)) if adjusted_pos_y >= 0 else math.ceil(adjusted_pos_y / (chunk_size * voxel_size)) - 1
 
     return chunk_x, chunk_y
+
+def adjust_hit_normal_to_cube(hit_normal: Vec3, voxel_orientation: Quat) -> Vec3:
+    """
+    Adjusts the spherical hit normal to align with the closest cube face normal.
+    
+    Parameters:
+    - hit_normal (Vec3): The normal vector from the raycast hit on the sphere.
+    - voxel_orientation (Quat): The quaternion representing the voxel's orientation.
+    
+    Returns:
+    - Vec3: The adjusted normal, aligned with a cube face and taking into account the voxel's orientation.
+    """        
+    # Identify the dominant axis
+    dominant_axis = max(range(3), key=lambda i: abs(hit_normal[i]))
+    
+    # Create the adjusted normal for the cube
+    cube_normal = Vec3(0, 0, 0)
+    cube_normal[dominant_axis] = 1 if hit_normal[dominant_axis] > 0 else -1
+    
+    # Apply the voxel's orientation to the adjusted normal
+    adjusted_normal = voxel_orientation.xform(cube_normal)
+    
+    return adjusted_normal
+
+def to_local_space(normal: Vec3, orientation: Quat) -> Vec3:
+    """
+    Convert a normal from world space to local space using the inverse of the given orientation.
+    
+    Parameters:
+    - normal (Vec3): The normal vector in world space.
+    - orientation (Quat): The orientation of the voxel.
+    
+    Returns:
+    - Vec3: The normal vector in local space.
+    """
+    # Manually create the inverse quaternion
+    inv_orientation = Quat(orientation)
+    inv_orientation.invert_in_place()  # Correctly inverting the quaternion
+    
+    local_normal = inv_orientation.xform(normal)
+    return local_normal
+
+def to_world_space(normal: Vec3, orientation: Quat) -> Vec3:
+    """
+    Convert a normal from local space to world space using the given orientation.
+    
+    Parameters:
+    - normal (Vec3): The normal vector in local space.
+    - orientation (Quat): The orientation of the voxel.
+    
+    Returns:
+    - Vec3: The normal vector in world space.
+    """
+    world_normal = orientation.xform(normal)
+    return world_normal

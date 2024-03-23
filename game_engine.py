@@ -14,32 +14,31 @@ from direct.gui.OnscreenImage import OnscreenImage
 
 from panda3d.core import (
     AmbientLight, DirectionalLight, KeyboardButton,
-    LineSegs, TextNode, WindowProperties,
-    loadPrcFileData, GeomVertexReader, LQuaternionf
+    LineSegs, TextNode,
+    loadPrcFileData, GeomVertexReader, Quat
 )
 from panda3d.bullet import (
-    BulletWorld, BulletRigidBodyNode,
+    BulletWorld, BulletRigidBodyNode, BulletDebugNode,
     BulletTriangleMesh, BulletTriangleMeshShape, BulletClosestHitRayResult
 )
-from panda3d.bullet import BulletWorld, BulletDebugNode
 from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
 from panda3d.core import WindowProperties
 from panda3d.core import NodePath
-from panda3d.core import TransparencyAttrib
 from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
 from voxel import (
-    DynamicArbitraryVoxelObject, create_single_voxel_mesh, create_dynamic_single_voxel_object,
+    DynamicArbitraryVoxelObject, create_dynamic_single_voxel_object,
 
 )
 from constants import VoxelType, voxel_type_map
 from world import (
-    VoxelWorld, get_center_of_hit_static_voxel, get_center_of_hit_dynamic_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position
+    VoxelWorld, get_center_of_hit_static_voxel, get_center_of_hit_dynamic_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position,
+    adjust_hit_normal_to_cube, to_local_space, to_world_space
 )
-from geom import create_geometry
-from jit import voxel_grid_coordinates_to_index, index_to_voxel_grid_coordinates, identify_exposed_voxels, create_mesh
+from geom import create_geometry, create_mesh
+from jit import voxel_grid_coordinates_to_index, index_to_voxel_grid_coordinates, identify_exposed_voxels, _create_mesh
 from util import toggle, create_voxel_type_value_color_list
 
 
@@ -50,7 +49,7 @@ loadPrcFileData("", "bullet-enable-contact-events true")
 loadPrcFileData('', 'win-size 1680 1050')
 loadPrcFileData("", "threading-model Cull/Draw")
 
-def pre_warmup_jit_functions():
+def pre_warm_jit_functions():
     print("Pre warming jit functions. Hold tight!")
     single_item_array = np.ones((1, 1, 1), np.int8)
     voxel_type_value_color_list = create_voxel_type_value_color_list()
@@ -58,7 +57,7 @@ def pre_warmup_jit_functions():
         lambda: index_to_voxel_grid_coordinates(0, 0, 0, 5),
         lambda: voxel_grid_coordinates_to_index(0, 0, 0, 5),
         lambda: identify_exposed_voxels(single_item_array),
-        lambda: create_mesh(single_item_array, 1.0, voxel_type_value_color_list, False),
+        lambda: _create_mesh(single_item_array, 1.0, voxel_type_value_color_list, False),
     ]
 
     for f in tqdm.tqdm(jit_functions):
@@ -72,24 +71,34 @@ class ObjectManager:
         self.objects = {}
 
     def register_object(self, 
-                        object: DynamicArbitraryVoxelObject, 
+                        object: DynamicArbitraryVoxelObject,
+                        node: BulletRigidBodyNode,
                         position: Vec3, 
                         velocity = Vec3(0, 0, 0), 
-                        orientation = LQuaternionf(0, 0, 0, 0),
+                        orientation = Quat(0, 0, 0, 0),
                         ccd=False):
+        
+        node_np = self.game_engine.render.attachNewNode(node)
+        self.game_engine.physics_world.attachRigidBody(node)
+
+        object.node_paths[(0, 0, 0)] = node_np
+        node_np.setPythonTag("object", object)
+        node_np.setPythonTag("ijk", (0, 0, 0))
+
         self.objects[object.id] = object
-        root_node_path = object.node_paths[(0, 0, 0)]
 
         geom_np = create_geometry(object.vertices, object.indices)
         geom_np.reparentTo(self.game_engine.render)
-        geom_np.reparentTo(root_node_path)
+        geom_np.reparentTo(node_np)
 
-        root_node_path.setPos(position)
-        root_node_path.setQuat(orientation)
+        node_np.setPos(position)
+        node_np.setQuat(orientation)
 
         object.set_velocity(velocity)
+        ccd = velocity.length() > 50
         if ccd:
             object.enable_ccd()
+
 
     def deregister_object(self, object):
         for _, node_path in object.node_paths.items():
@@ -114,7 +123,7 @@ class GameEngine(ShowBase):
         #self.taskMgr.popupControls()
         print("isThreadingSupported", Thread.isThreadingSupported())
         
-        self.voxel_size = 0.25
+        self.voxel_size = 1
         self.ground_height = self.voxel_size / 2
         self.max_height = args.n * 10
         self.chunk_size = 2 * args.n - 1
@@ -130,13 +139,13 @@ class GameEngine(ShowBase):
         self.selected_voxel_type_value = 0
         self.selected_voxel_type = VoxelType.AIR
 
-        self.camera.setPos(0, 0, 50)
-        self.camera.lookAt(1, 1, 1)
+        self.camera.setPos(0, 0, 2)
+        self.camera.lookAt(0, 1, 2)
         self.camera_speed = 20 * self.voxel_size
         self.camera_lift_speed = 20 * self.voxel_size
         self.camera_rotate_speed = 75
 
-        pre_warmup_jit_functions()
+        pre_warm_jit_functions()
         self.setup_physics()
         self.setup_environment()
         self.setup_lighting()
@@ -144,7 +153,10 @@ class GameEngine(ShowBase):
         self.setup_movement_controls()
         self.init_fps_counter()
         self.init_mouse_control()
-
+        if self.args.debug:
+            self.add_axes()
+        
+        
         self.taskMgr.add(self.move_camera_task, "MoveCameraTask")
         self.taskMgr.add(self.update_fps_counter, "UpdateFPSTask")
         self.taskMgr.add(self.mouse_task, "MouseTask")
@@ -157,9 +169,9 @@ class GameEngine(ShowBase):
         self.accept('b', self.toggle_build_mode)
         self.accept('i', self.print_world_info)
         self.accept('wheel_up', self.on_mouse_wheel_up)
-        
-        # Listen for mouse wheel down event
         self.accept('wheel_down', self.on_mouse_wheel_down)
+
+        self.collision_count = 0
 
     def setup_environment(self):
         #build_robot(self.physics_world)
@@ -187,10 +199,11 @@ class GameEngine(ShowBase):
 
         if self.build_mode == True:
             raycast_result = self.cast_ray_from_camera(self.spawn_distance)
+            hit_pos = raycast_result.getHitPos()
+            hit_normal = raycast_result.getHitNormal()
 
             if raycast_result.hasHit():
-                voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
-                hit_normal = raycast_result.getHitNormal()
+                voxel_center_pos = get_center_of_hit_static_voxel(hit_pos, hit_normal, self.voxel_size)
                 position = voxel_center_pos + hit_normal * self.voxel_size
             else:
                 position = self.get_spawn_position()
@@ -209,20 +222,33 @@ class GameEngine(ShowBase):
             
             if raycast_result.hasHit():
                 hit_node = raycast_result.getNode()
+                hit_pos = raycast_result.getHitPos()
                 hit_normal = raycast_result.getHitNormal()
 
                 if hit_node.static:
-                    voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                    voxel_center_pos = get_center_of_hit_static_voxel(hit_pos, hit_normal, self.voxel_size)
                     position = voxel_center_pos + hit_normal * self.voxel_size
-                    orientation = LQuaternionf.identQuat()
+                    orientation = Quat.identQuat()
                     self.placeholder_cube.setPos(position)
                     self.placeholder_cube.setQuat(orientation)
                 else:
-                    voxel_center_pos = get_center_of_hit_dynamic_voxel(raycast_result)
+                    voxel_center_pos = get_center_of_hit_dynamic_voxel(hit_node)
                     hit_object = hit_node.getPythonTag("object")
-                    position = voxel_center_pos + hit_normal * self.voxel_size
-                    self.placeholder_cube.setPos(position)
-                    self.placeholder_cube.setQuat(hit_object.get_orientation())
+                    orientation = hit_object.get_orientation()
+                    
+                    # Convert the hit normal to the local space of the voxel
+                    local_hit_normal = to_local_space(hit_normal, orientation)
+
+                    # Adjust the local hit normal to align with the closest cube face
+                    adjusted_local_normal = adjust_hit_normal_to_cube(local_hit_normal, Quat.identQuat())
+
+                    # Convert the adjusted local hit normal back to world space
+                    adjusted_world_normal = to_world_space(adjusted_local_normal, orientation)
+
+                    create_position = voxel_center_pos + adjusted_world_normal * self.voxel_size
+
+                    self.placeholder_cube.setPos(create_position)
+                    self.placeholder_cube.setQuat(orientation)
             else:
                 position = self.get_spawn_position()
                 orientation = self.camera.getQuat()
@@ -237,8 +263,12 @@ class GameEngine(ShowBase):
         return self.camera.getPos() + forward_vec * self.spawn_distance
 
     def _create_translucent_voxel(self, position: Vec3) -> NodePath:
-        vertices, indices, = create_single_voxel_mesh(VoxelType.STONE, self.voxel_size, self.args.debug)
+        voxel_array = np.zeros((1, 1, 1), np.int8)
+        voxel_array[0, 0, 0] = VoxelType.PLACEHOLDER_BLOCK.value
+        
+        vertices, indices = create_mesh(voxel_array, self.voxel_size, self.args.debug)
         cube = create_geometry(vertices, indices)
+
         cube.setPos(position)
         cube.setTransparency(TransparencyAttrib.M_alpha)
         cube.reparentTo(self.render)
@@ -254,14 +284,15 @@ class GameEngine(ShowBase):
             hit_normal = raycast_result.getHitNormal()
 
             if hit_node.static:
-                voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+                voxel_center_pos = get_center_of_hit_static_voxel(hit_pos, hit_normal, self.voxel_size)
                 create_position = voxel_center_pos + hit_normal * self.voxel_size
                 self.create_static_voxel(create_position, self.selected_voxel_type)
             else:
                 hit_object = hit_node.getPythonTag("object")
-                create_position, velocity, orientation = hit_object.add_voxel(hit_pos, hit_normal, self.selected_voxel_type, self)
-                create_position = get_center_of_hit_dynamic_voxel(raycast_result) + hit_normal         
-                self.object_manager.update_object(hit_object, create_position, velocity, orientation)
+                ijk = hit_node.getPythonTag("ijk")
+                hit_object.add_voxel(ijk, hit_pos, hit_normal, self.selected_voxel_type)
+                #create_position = get_center_of_hit_dynamic_voxel(hit_node)         
+                #self.object_manager.update_object(hit_object, create_position, velocity, orientation)
         else:
             # place voxel in mid air
             position = self.get_spawn_position()
@@ -269,10 +300,9 @@ class GameEngine(ShowBase):
             velocity = Vec3(0, 0, 0)
             self.create_dynamic_voxel(position, velocity, orientation, self.selected_voxel_type)
 
-    def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Vec3, voxel_type: VoxelType):
-        object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.render, self.physics_world, self.args.debug)
-        ccd = velocity.length() > 50
-        self.object_manager.register_object(object, position, velocity, orientation, ccd)
+    def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Quat, voxel_type: VoxelType):
+        object, node = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.args.debug)
+        self.object_manager.register_object(object, node, position, velocity, orientation)
 
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType):
         t0 = time.perf_counter()
@@ -290,8 +320,7 @@ class GameEngine(ShowBase):
         try:
             # Set the voxel type at the calculated local coordinates
             voxel_world.set_voxel(ix, iy, iz, voxel_type)
-            voxel_type_value_color_list = create_voxel_type_value_color_list()
-            vertices, indices = create_mesh(voxel_world.world_array, self.voxel_size, voxel_type_value_color_list, self.args.debug)
+            vertices, indices = create_mesh(voxel_world.world_array, self.voxel_size, self.args.debug)
             t3 = time.perf_counter()
             voxel_world.terrain_np = create_geometry(vertices, indices)
             t4 = time.perf_counter()
@@ -324,7 +353,7 @@ class GameEngine(ShowBase):
                 position = node_path.getPos()
                 print("ijk", ijk, "position", position)
 
-            voxel_center_pos = get_center_of_hit_static_voxel(raycast_result, self.voxel_size)
+            voxel_center_pos = get_center_of_hit_static_voxel(hit_pos, hit_normal, self.voxel_size)
             chunk_coords = calculate_world_chunk_coordinates(voxel_center_pos, self.chunk_size, self.voxel_size)
             center_chunk_pos = calculate_chunk_world_position(chunk_coords, self.chunk_size, self.voxel_size)
 
@@ -437,6 +466,36 @@ class GameEngine(ShowBase):
         lines_np.attachNewNode(lines.create())
         lines_np.reparentTo(self.render)
 
+    def add_axes(self, scale = 0.5):
+        """
+        Adds RGB axes to the scene (red for X, green for Y, blue for Z).
+        
+        Parameters:
+            scale (float): Determines the length of the axes.
+        """
+        # Create a LineSegs object
+        axes = LineSegs()
+        axes.setThickness(2.0)
+        
+        # X-axis (Red)
+        axes.setColor(1, 0, 0, 1)  # Set color to red
+        axes.moveTo(0, 0, 2)
+        axes.drawTo(scale, 0, 2)
+        
+        # Y-axis (Green)
+        axes.setColor(0, 1, 0, 1)  # Set color to green
+        axes.moveTo(0, 0, 2)
+        axes.drawTo(0, scale, 2)
+        
+        # Z-axis (Blue)
+        axes.setColor(0, 0, 1, 1)  # Set color to blue
+        axes.moveTo(0, 0, 2)
+        axes.drawTo(0, 0, 2+scale)
+        
+        # Create a node path for the axes and attach it to the render
+        axes_np = NodePath(axes.create())
+        axes_np.reparentTo(self.render)
+
     def create_and_apply_mesh_and_physics(self, 
                                            coordinates: tuple[int, int], 
                                            voxel_world: VoxelWorld,
@@ -479,7 +538,6 @@ class GameEngine(ShowBase):
 
         terrain_shape = BulletTriangleMeshShape(terrainMesh, dynamic=False)
         terrain_node = BulletRigidBodyNode('Terrain')
-        terrain_node.setFriction(50)
         terrain_node.addShape(terrain_shape)
         terrain_np = self.render.attachNewNode(terrain_node)
 
@@ -503,19 +561,20 @@ class GameEngine(ShowBase):
         self.physics_world.doPhysics(dt)
 
         # Example manual collision check
-        '''
+
         for node in self.physics_world.getRigidBodies():
             result = self.physics_world.contactTest(node)
             if result.getNumContacts() > 0:
-                print(f"Collision detected for {node.getName()}")
-        '''
+                self.collision_count += 1
+                print(f"Collision detected for {node.getName()} #{self.collision_count}")
+
         return Task.cont
 
     def init_mouse_control(self):
         """Initial setup for mouse control."""
-        self.disableMouse()  # Disable the default mouse camera control
-        self.mouseSpeedX = 100  # Adjust as needed
-        self.mouseSpeedY = 100  # Adjust as needed
+        self.disableMouse() # Disable the default mouse camera control
+        self.mouseSpeedX = 100
+        self.mouseSpeedY = 100
         self.lastMouseX = 0
         self.lastMouseY = 0
         self.cameraPitch = 0
@@ -628,7 +687,7 @@ if __name__ == "__main__":
     # Create a WindowProperties object
     props = WindowProperties()
     # Set the cursor visibility to False
-    props.setCursorHidden(True)
+    props.setCursorHidden(False)
     # Apply the properties to the main window
     game.win.requestProperties(props)
     game.run()

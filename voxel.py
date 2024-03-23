@@ -2,14 +2,15 @@ import numpy as np
 import uuid
 
 from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape
-from panda3d.core import Vec3, LQuaternionf
+from panda3d.core import Vec3, Quat
 from panda3d.bullet import BulletGenericConstraint, BulletRigidBodyNode
 from panda3d.core import TransformState, NodePath
 from panda3d.bullet import BulletWorld
 
 from constants import material_properties, VoxelType, voxel_type_map
-from jit import index_to_voxel_grid_coordinates, create_mesh
-from util import create_voxel_type_value_color_list
+from jit import index_to_voxel_grid_coordinates, voxel_grid_coordinates_to_index
+from geom import create_mesh
+from world import adjust_hit_normal_to_cube, to_world_space, to_local_space 
 
 
 class DynamicArbitraryVoxelObject:
@@ -19,8 +20,6 @@ class DynamicArbitraryVoxelObject:
                  voxel_size: float, 
                  vertices: np.ndarray, 
                  indices: np.ndarray,
-                 mass: float, 
-                 friction: float, 
                  name: str = "VoxelObject",
                  debug: bool = False):
         
@@ -30,68 +29,77 @@ class DynamicArbitraryVoxelObject:
 
         self.voxel_array = voxel_array
         self.voxel_size = voxel_size
+
         self.vertices = vertices
         self.indices = indices
         
         self.debug = debug
         self.name = name
         self.id = str(uuid.uuid4())
-        self.mass = mass
-        self.friction = friction
         
         self.node_paths: dict[tuple[int, int, int], NodePath] = {}
 
-    def get_offset(self) -> np.ndarray: # deprecated?
+    def get_offset(self) -> np.ndarray:
         return (np.array(self.voxel_array.shape) - 1) // 2
+    
+    def _set_voxel(self, ix: int, iy: int, iz: int, voxel_type: VoxelType):
+        offset = self.get_offset()
+        i = offset[0] + ix
+        j = offset[1] + iy
+        k = offset[2] + iz
+        self.voxel_array[i, j, k] = voxel_type.value
 
-    def add_voxel(self, hit_pos: Vec3, hit_normal: Vec3, voxel_type: VoxelType, game_engine):
-        root_node_path = self.node_paths[(0, 0, 0)]
-        root_node_pos = root_node_path.getPos()       
-        orientation = root_node_path.getQuat()
+    def add_voxel(self, ijk: tuple[int, int, int], hit_pos: Vec3, hit_normal: Vec3, voxel_type: VoxelType):
+        hit_node_path = self.node_paths[ijk]
+        orientation = hit_node_path.getQuat()
 
-        # Use the quaternion to transform the local forward direction to world space
-        world_forward = Vec3(0, 1, 0)
-        local_forward = orientation.xform(world_forward)
+        # Convert the hit normal to the local space of the voxel
+        local_hit_normal = to_local_space(hit_normal, orientation)
 
-        ix = 1# TODO
-        iy = 1# TODO
-        iz = 1# TODO
+        # Adjust the local hit normal to align with the closest cube face
+        adjusted_local_normal = adjust_hit_normal_to_cube(local_hit_normal, Quat.identQuat())
+
+        i, j, k = ijk
+        ix = int(adjusted_local_normal.x) + i
+        iy = int(adjusted_local_normal.y) + j
+        iz = int(adjusted_local_normal.z) + k
 
 
-        max_i, max_j, max_k = self.voxel_array.shape
-        if not (0 <= ix < max_i and 0 <= iy < max_j and 0 <= iz < max_k):
+        print("ix, iy, iz", ix, iy, iz)
+
+
+
+        if not (0 <= abs(ix) < self.voxel_array.shape[0] // 2 or \
+                0 <= abs(iy) < self.voxel_array.shape[1] // 2 or \
+                0 <= abs(iz) < self.voxel_array.shape[2] // 2):
+            
             self.extend_array_uniformly()
-        self.voxel_array[ix, iy, iz] = voxel_type.value
+ 
+        #self.voxel_array[ix, iy, iz] = voxel_type.value
+        self._set_voxel(ix, iy, iz, voxel_type)
 
-        voxel_type_value_color_list = create_voxel_type_value_color_list()
-        self.vertices, self.indices = create_mesh(object.voxel_array, object.voxel_size, voxel_type_value_color_list, self.debug)
 
-        body_indices = np.argwhere(self.voxel_array)
-        parts = []
-        for i, j, k in body_indices:
-            ix, iy, iz = index_to_voxel_grid_coordinates(i, j, k, self.voxel_array.shape[0])
+        vertices, indices = create_mesh(self.voxel_array, self.voxel_size, self.debug)
 
-            position = root_node_pos
 
-            node_np = create_dynamic_single_voxel_physics_node(self, game_engine.render, game_engine.physics_world)
-            node_np.setPythonTag("object", self)
-            node_np.setQuat(orientation)
-            node_np.setPos(position)
-            self.node_paths[(i, j, k)] = node_np
-            parts.append(node_np)
+        material = material_properties[voxel_type.value]
+        radius = self.voxel_size / 2
+        
+        shape = BulletSphereShape(radius)
+        node = BulletRigidBodyNode(self.name)
+        node.addShape(shape)
+        node.setMass(material["mass"])
+        node.setFriction(material["friction"])
+        node.setRestitution(material["restitution"]) # Adjust based on testing
+        node.setLinearDamping(material["linear_damping"]) # Lower values to reduce damping effect
+        node.setAngularDamping(material["angular_damping"])
 
-        for i in range(1, len(parts)):
-            # Assuming bodyA and bodyB are instances of BulletRigidBodyNode you want to connect
-            constraint = BulletGenericConstraint(parts[i-1].node(), parts[i].node(), TransformState.makeIdentity(), TransformState.makeIdentity(), True)
 
-            # Lock all degrees of freedom to simulate a fixed constraint
-            for i in range(6):
-                constraint.setParam(i, 0, 0) 
-            game_engine.physics_world.attachConstraint(constraint)
 
-        velocity = root_node_path.node().getLinearVelocity()
+        #velocity = root_node_path.node().getLinearVelocity()
 
-        return root_node_pos, velocity, orientation
+        return #root_node_pos, velocity, orientation
+
 
     def extend_array_uniformly(self):
         # Specify the padding width of 1 for all sides of all dimensions
@@ -112,7 +120,7 @@ class DynamicArbitraryVoxelObject:
         print(f"Local Position: {local_position}")
         print(f"Global Position: {global_position}")
 
-    def get_orientation(self) -> LQuaternionf:
+    def get_orientation(self) -> Quat:
         root_node_path = self.node_paths[(0, 0, 0)]
         return root_node_path.getQuat()
     
@@ -130,49 +138,34 @@ class DynamicArbitraryVoxelObject:
             node.setCcdSweptSphereRadius(ccd_radius)
 
 
-def create_dynamic_single_voxel_object(voxel_size: int, voxel_type: VoxelType, render, physics_world, debug: bool) -> DynamicArbitraryVoxelObject:
-    voxel_array = np.ones((1, 1, 1), dtype=int)
-    vertices, indices = create_single_voxel_mesh(voxel_type, voxel_size, debug)
+def create_dynamic_single_voxel_object(voxel_size: int, voxel_type: VoxelType, debug: bool) -> DynamicArbitraryVoxelObject:
+    voxel_array = np.zeros((1, 1, 1), np.int8)
+    voxel_array[0, 0, 0] = voxel_type.value
+    vertices, indices = create_mesh(voxel_array, voxel_size, debug)
 
-    mass = material_properties[voxel_type]["mass"]
-    friction = material_properties[voxel_type]["friction"]
-    
-    object = DynamicArbitraryVoxelObject(voxel_array, voxel_size, vertices, indices, mass, friction)
-    object_np = create_dynamic_single_voxel_physics_node(object, render, physics_world)
-    object_np.setPythonTag("object", object)
-    object_np.setPythonTag("ijk", (0, 0, 0))
-    object.node_paths[(0, 0, 0)]  = object_np
-    return object            
+    object = DynamicArbitraryVoxelObject(voxel_array, voxel_size, vertices, indices)
+    node = create_dynamic_single_voxel_physics_node(object)
+    return object, node           
 
-
-def create_dynamic_single_voxel_physics_node(object: DynamicArbitraryVoxelObject, render: NodePath, physics_world: BulletWorld) -> NodePath:
+def create_dynamic_single_voxel_physics_node(object: DynamicArbitraryVoxelObject) -> NodePath:
     voxel_type_value = object.voxel_array[0, 0, 0]
     voxel_type = voxel_type_map[voxel_type_value]
     material = material_properties[voxel_type]
-    
     radius = object.voxel_size / 2
+    
     shape = BulletSphereShape(radius)
     node = BulletRigidBodyNode(object.name)
+    node.addShape(shape)
     node.setMass(material["mass"])
     node.setFriction(material["friction"])
-    node.addShape(shape)
+    node.setRestitution(material["restitution"]) # Adjust based on testing
+    node.setLinearDamping(material["linear_damping"]) # Lower values to reduce damping effect
+    node.setAngularDamping(material["angular_damping"])
 
-    # Set the initial position of the segment
-    node_np = render.attachNewNode(node)
-    
-    # Add the node to the Bullet world
-    physics_world.attachRigidBody(node)
-    return node_np
-
-def create_single_voxel_mesh(voxel_type: VoxelType, voxel_size: float, debug: bool) -> tuple[np.ndarray, np.ndarray]:
-    voxel_array = np.zeros((1, 1, 1), np.int8)
-    voxel_array[0, 0, 0] = voxel_type.value
-    voxel_type_value_color_list = create_voxel_type_value_color_list()
-    return create_mesh(voxel_array, voxel_size, voxel_type_value_color_list, debug)
-
-def create_object_mesh(object: DynamicArbitraryVoxelObject) -> tuple[np.ndarray, np.ndarray]:
-    voxel_type_value_color_list = create_voxel_type_value_color_list()
-    return create_mesh(object.voxel_array, object.voxel_size, voxel_type_value_color_list, object.debug)
+    #node_np = render.attachNewNode(node)
+    #physics_world.attachRigidBody(node)
+    #return node_np
+    return node
 
 def noop_transform(face):
     return face
@@ -188,7 +181,4 @@ def rotate_face_90_degrees_ccw_around_x(face):
 def rotate_face_90_degrees_ccw_around_y(face):
     # Rotate each point in the face 90 degrees counter-clockwise around the Y axis
     return [(z, y, -x) for x, y, z in face]
-
-
-
 
