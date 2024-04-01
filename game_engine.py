@@ -34,11 +34,14 @@ from voxel import (
 )
 from constants import VoxelType, voxel_type_map
 from world import (
-    VoxelWorld, get_center_of_hit_static_voxel, get_center_of_hit_dynamic_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position,
-    adjust_hit_normal_to_cube, to_local_space, to_world_space
+    VoxelWorld, get_center_of_hit_static_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position,
+    adjust_spherical_normal_to_cube, to_local_space, to_world_space, project_sphere_point_to_cube
 )
 from geom import create_geometry, create_mesh
-from jit import voxel_grid_coordinates_to_index, index_to_voxel_grid_coordinates, identify_exposed_voxels, _create_mesh
+from jit import (
+    world_grid_coordinates_to_index, index_to_world_grid_coordinates, identify_exposed_voxels, _create_mesh, 
+    _generate_face_vertices, _check_surrounding_air
+)
 from util import toggle, create_voxel_type_value_color_list
 
 
@@ -54,10 +57,12 @@ def pre_warm_jit_functions():
     single_item_array = np.ones((1, 1, 1), np.int8)
     voxel_type_value_color_list = create_voxel_type_value_color_list()
     jit_functions = [
-        lambda: index_to_voxel_grid_coordinates(0, 0, 0, 5),
-        lambda: voxel_grid_coordinates_to_index(0, 0, 0, 5),
-        lambda: identify_exposed_voxels(single_item_array),
+        lambda: _generate_face_vertices(1, 1, 1, (0, 1, 0), 0.5),
+        lambda: _check_surrounding_air(single_item_array, 0, 0, 0),
         lambda: _create_mesh(single_item_array, 1.0, voxel_type_value_color_list, False),
+        lambda: index_to_world_grid_coordinates(0, 0, 0, 5),
+        lambda: world_grid_coordinates_to_index(0, 0, 0, 5),
+        lambda: identify_exposed_voxels(single_item_array),
     ]
 
     for f in tqdm.tqdm(jit_functions):
@@ -72,19 +77,17 @@ class ObjectManager:
 
     def register_object(self, 
                         object: DynamicArbitraryVoxelObject,
-                        node: BulletRigidBodyNode,
                         position: Vec3, 
                         velocity = Vec3(0, 0, 0), 
                         orientation = Quat(0, 0, 0, 0),
                         ccd=False):
         
+        node = object.node
         node_np = self.game_engine.render.attachNewNode(node)
         self.game_engine.physics_world.attachRigidBody(node)
 
-        object.node_paths[(0, 0, 0)] = node_np
         node_np.setPythonTag("object", object)
-        node_np.setPythonTag("ijk", (0, 0, 0))
-
+        object.node_np = node_np
         self.objects[object.id] = object
 
         geom_np = create_geometry(object.vertices, object.indices)
@@ -101,16 +104,13 @@ class ObjectManager:
 
 
     def deregister_object(self, object):
-        for _, node_path in object.node_paths.items():
-            self.game_engine.physics_world.removeRigidBody(node_path.node())
-            node_path.removeNode()
+        self.game_engine.physics_world.removeRigidBody(object.node_np.node())
+        object.node_np.removeNode()
         del self.objects[object.id]
-        del object
 
     def update_object(self, object, position, velocity, orientation):
-        new_object = copy.deepcopy(object)
         self.deregister_object(object)
-        self.register_object(new_object, position, velocity, orientation)
+        self.register_object(object, position, velocity, orientation)
 
 
 class GameEngine(ShowBase):
@@ -123,7 +123,7 @@ class GameEngine(ShowBase):
         #self.taskMgr.popupControls()
         print("isThreadingSupported", Thread.isThreadingSupported())
         
-        self.voxel_size = 1
+        self.voxel_size = 0.1
         self.ground_height = self.voxel_size / 2
         self.max_height = args.n * 10
         self.chunk_size = 2 * args.n - 1
@@ -134,7 +134,7 @@ class GameEngine(ShowBase):
 
         self.build_mode = False
         self.placeholder_cube: NodePath = None
-        self.spawn_distance = 10
+        self.spawn_distance = 1.5
 
         self.selected_voxel_type_value = 0
         self.selected_voxel_type = VoxelType.AIR
@@ -171,10 +171,9 @@ class GameEngine(ShowBase):
         self.accept('wheel_up', self.on_mouse_wheel_up)
         self.accept('wheel_down', self.on_mouse_wheel_down)
 
-        self.collision_count = 0
-
     def setup_environment(self):
         #build_robot(self.physics_world)
+        self.create_dynamic_voxel(Vec3(0, 0, 5), Vec3(0, 0, 0), Quat(0, 0, 0, 0), VoxelType.GRASS)
         pass
 
     def on_mouse_wheel_up(self):
@@ -232,20 +231,22 @@ class GameEngine(ShowBase):
                     self.placeholder_cube.setPos(position)
                     self.placeholder_cube.setQuat(orientation)
                 else:
-                    voxel_center_pos = get_center_of_hit_dynamic_voxel(hit_node)
                     hit_object = hit_node.getPythonTag("object")
+                    object_center_pos = hit_object.get_position()
                     orientation = hit_object.get_orientation()
                     
                     # Convert the hit normal to the local space of the voxel
                     local_hit_normal = to_local_space(hit_normal, orientation)
 
                     # Adjust the local hit normal to align with the closest cube face
-                    adjusted_local_normal = adjust_hit_normal_to_cube(local_hit_normal, Quat.identQuat())
+                    adjusted_local_normal = adjust_spherical_normal_to_cube(local_hit_normal, Quat.identQuat())
 
-                    # Convert the adjusted local hit normal back to world space
-                    adjusted_world_normal = to_world_space(adjusted_local_normal, orientation)
+                    adjusted_hit_pos = project_sphere_point_to_cube(hit_pos)
 
-                    create_position = voxel_center_pos + adjusted_world_normal * self.voxel_size
+
+                    hit_voxel_center_pos = object_center_pos + adjusted_hit_pos 
+
+                    create_position = hit_voxel_center_pos + adjusted_local_normal * self.voxel_size
 
                     self.placeholder_cube.setPos(create_position)
                     self.placeholder_cube.setQuat(orientation)
@@ -289,10 +290,11 @@ class GameEngine(ShowBase):
                 self.create_static_voxel(create_position, self.selected_voxel_type)
             else:
                 hit_object = hit_node.getPythonTag("object")
-                ijk = hit_node.getPythonTag("ijk")
-                hit_object.add_voxel(ijk, hit_pos, hit_normal, self.selected_voxel_type)
-                #create_position = get_center_of_hit_dynamic_voxel(hit_node)         
-                #self.object_manager.update_object(hit_object, create_position, velocity, orientation)
+                hit_object.add_voxel(hit_pos, hit_normal, self.selected_voxel_type)
+                create_position = hit_object.get_position()
+                velocity = hit_object.get_velocity()
+                orientation = hit_object.get_orientation()
+                self.object_manager.update_object(hit_object, create_position, velocity, orientation)
         else:
             # place voxel in mid air
             position = self.get_spawn_position()
@@ -301,8 +303,8 @@ class GameEngine(ShowBase):
             self.create_dynamic_voxel(position, velocity, orientation, self.selected_voxel_type)
 
     def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Quat, voxel_type: VoxelType):
-        object, node = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.args.debug)
-        self.object_manager.register_object(object, node, position, velocity, orientation)
+        object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.args.debug)
+        self.object_manager.register_object(object, position, velocity, orientation)
 
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType):
         t0 = time.perf_counter()
@@ -348,10 +350,7 @@ class GameEngine(ShowBase):
             
             if not hit_node.static:
                 hit_object = hit_node.getPythonTag("object")
-                ijk = hit_node.getPythonTag("ijk")
-                node_path = hit_object.node_paths[ijk]
-                position = node_path.getPos()
-                print("ijk", ijk, "position", position)
+                print("hit_object", hit_object)
 
             voxel_center_pos = get_center_of_hit_static_voxel(hit_pos, hit_normal, self.voxel_size)
             chunk_coords = calculate_world_chunk_coordinates(voxel_center_pos, self.chunk_size, self.voxel_size)
@@ -561,13 +560,12 @@ class GameEngine(ShowBase):
         self.physics_world.doPhysics(dt)
 
         # Example manual collision check
-
+        '''
         for node in self.physics_world.getRigidBodies():
             result = self.physics_world.contactTest(node)
             if result.getNumContacts() > 0:
-                self.collision_count += 1
-                print(f"Collision detected for {node.getName()} #{self.collision_count}")
-
+                print(f"Collision detected for {node}")
+        '''
         return Task.cont
 
     def init_mouse_control(self):

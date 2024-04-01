@@ -13,7 +13,7 @@ def create_mesh(voxel_array: np.ndarray,
                 debug: bool) -> tuple[np.ndarray, np.ndarray]:
     
     voxel_type_value_color_list = create_voxel_type_value_color_list()
-    return _create_mesh(voxel_array, voxel_size, voxel_type_value_color_list, debug)    
+    return _create_mesh(voxel_array, voxel_size, voxel_type_value_color_list, debug)
 
 def create_geometry(vertices: np.ndarray, indices: np.ndarray, name: str = "geom_node") -> NodePath:
     num_vertices = len(vertices) // 10

@@ -3,11 +3,12 @@ import noise
 import math
 from functools import lru_cache
 
-from panda3d.core import Vec3, Vec2, NodePath, Quat
+from panda3d.core import Vec3, Vec2, NodePath, Quat, Point3
 from panda3d.bullet import BulletRigidBodyNode
 
 from constants import VoxelType, voxel_type_map
-from jit import voxel_grid_coordinates_to_index
+from jit import world_grid_coordinates_to_index
+from perlin_jit import pnoise2
 
 
 class VoxelWorld:
@@ -33,12 +34,12 @@ class VoxelWorld:
     def get_voxel_type(self, ix: int, iy: int, iz: int) -> VoxelType: 
         # Assuming world_array is centered around (0, 0, 0) at initialization
         # and offset is half the size of the current array dimensions.
-        i, j, k = voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = world_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         voxel_type_int = self.world_array[i, j, k]
         return voxel_type_map[voxel_type_int]
 
     def set_voxel(self, ix: int, iy: int, iz: int, voxel_type: VoxelType):
-        i, j, k = voxel_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
+        i, j, k = world_grid_coordinates_to_index(ix, iy, iz, self.world_array.shape[0])
         self.world_array[i, j, k] = voxel_type.value
 
 
@@ -52,12 +53,12 @@ def get_center_of_hit_static_voxel(hit_pos: Vec3, hit_normal: Vec3, voxel_size: 
     Identifies the voxel hit by a raycast and returns its center position in world space.
     
     Parameters:
-    - hit_pos: The position of the hit.
-    - hit_normal: The normal vector to the face that was hit.
-    - voxel_size: The size of a voxel.
+        - hit_pos: The position of the hit.
+        - hit_normal: The normal vector to the face that was hit.
+        - voxel_size: The size of a voxel.
     
     Returns:
-    - Vec3: The center position of the hit voxel in world space.
+        - Vec3: The center position of the hit voxel in world space.
     """
 
     # Nudge the hit position slightly towards the opposite direction of the normal
@@ -79,13 +80,6 @@ def get_center_of_hit_static_voxel(hit_pos: Vec3, hit_normal: Vec3, voxel_size: 
         voxel_center_z += voxel_size
 
     return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
-
-def get_center_of_hit_dynamic_voxel(hit_node: BulletRigidBodyNode) -> Vec3:
-    hit_object = hit_node.getPythonTag("object")
-    ijk = hit_node.getPythonTag("ijk")
-
-    node_np = hit_object.node_paths[ijk]
-    return node_np.getPos()
 
 def create_voxel_world(chunk_size: int, max_height: int, chunk_coordinates: tuple[int, int], voxel_size: float) -> VoxelWorld:
     width = chunk_size
@@ -183,12 +177,12 @@ def calculate_chunk_world_position(chunk_coordinates: tuple[int, int], chunk_siz
     Calculates the world position of the chunk origo based on its grid coordinates.
 
     Parameters:
-    - coordinates: The chunk's coordinates in the grid/map.
-    - chunk_size: Number of voxels along a single axis of the chunk.
-    - voxel_size: Size of a voxel
+        - coordinates: The chunk's coordinates in the grid/map.
+        - chunk_size: Number of voxels along a single axis of the chunk.
+        - voxel_size: Size of a voxel
 
     Returns:
-    Vec2: The world position of the chunk.
+        - Vec2: The world position of the chunk.
     """
     chunk_x, chunk_y = chunk_coordinates
     x = chunk_x * chunk_size * voxel_size
@@ -200,12 +194,12 @@ def calculate_world_chunk_coordinates(position: Vec2, chunk_size: int, voxel_siz
     Calculates the chunk grid coordinates corresponding to a world position.
 
     Parameters:
-    - position: A Vec3 representing the world position.
-    - voxel_size: Size of a voxel.
-    - chunk_size: Number of voxels along a single axis of the chunk.
+        - position: A Vec3 representing the world position.
+        - voxel_size: Size of a voxel.
+        - chunk_size: Number of voxels along a single axis of the chunk.
 
     Returns:    
-    Tuple[int, int]: The chunk's grid coordinates (chunk_x, chunk_y).
+        - Tuple[int, int]: The chunk's grid coordinates (chunk_x, chunk_y).
     """
     # Calculate the half-size of a chunk in world units
     half_chunk_size_world_units = (chunk_size * voxel_size) / 2
@@ -220,16 +214,16 @@ def calculate_world_chunk_coordinates(position: Vec2, chunk_size: int, voxel_siz
 
     return chunk_x, chunk_y
 
-def adjust_hit_normal_to_cube(hit_normal: Vec3, voxel_orientation: Quat) -> Vec3:
+def adjust_spherical_normal_to_cube(hit_normal: Vec3, voxel_orientation: Quat) -> Vec3:
     """
     Adjusts the spherical hit normal to align with the closest cube face normal.
     
     Parameters:
-    - hit_normal (Vec3): The normal vector from the raycast hit on the sphere.
-    - voxel_orientation (Quat): The quaternion representing the voxel's orientation.
+        - hit_normal (Vec3): The normal vector from the raycast hit on the sphere.
+        - voxel_orientation (Quat): The quaternion representing the voxel's orientation.
     
     Returns:
-    - Vec3: The adjusted normal, aligned with a cube face and taking into account the voxel's orientation.
+        - Vec3: The adjusted normal, aligned with a cube face and taking into account the voxel's orientation.
     """        
     # Identify the dominant axis
     dominant_axis = max(range(3), key=lambda i: abs(hit_normal[i]))
@@ -248,11 +242,11 @@ def to_local_space(normal: Vec3, orientation: Quat) -> Vec3:
     Convert a normal from world space to local space using the inverse of the given orientation.
     
     Parameters:
-    - normal (Vec3): The normal vector in world space.
-    - orientation (Quat): The orientation of the voxel.
+        - normal (Vec3): The normal vector in world space.
+        - orientation (Quat): The orientation of the voxel.
     
     Returns:
-    - Vec3: The normal vector in local space.
+        - Vec3: The normal vector in local space.
     """
     # Manually create the inverse quaternion
     inv_orientation = Quat(orientation)
@@ -266,11 +260,35 @@ def to_world_space(normal: Vec3, orientation: Quat) -> Vec3:
     Convert a normal from local space to world space using the given orientation.
     
     Parameters:
-    - normal (Vec3): The normal vector in local space.
-    - orientation (Quat): The orientation of the voxel.
+        - normal (Vec3): The normal vector in local space.
+        - orientation (Quat): The orientation of the voxel.
     
     Returns:
-    - Vec3: The normal vector in world space.
+        - Vec3: The normal vector in world space.
     """
     world_normal = orientation.xform(normal)
     return world_normal
+
+def project_sphere_point_to_cube(point: Point3) -> Point3:
+    """
+    Project a point from the surface of a unit sphere to the surface of an enclosing cube.
+
+    Parameters:
+        - point (Point3): A 3D point (x, y, z) on the surface of the unit sphere.
+
+    Returns:
+        - Point3: The projected 3D point on the surface of the enclosing cube.
+    """
+    # Normalize the point to ensure it's on the surface of the unit sphere
+    normalized_point = point / point.length()
+    
+    # Identify the dominant axis by comparing the absolute values
+    abs_point = Vec3(abs(normalized_point.x), abs(normalized_point.y), abs(normalized_point.z))
+    dominant_axis = max(abs_point.x, abs_point.y, abs_point.z)
+    
+    # Scale the normalized point so that the projection lands on the cube's surface
+    # The scale factor is the inverse of the dominant axis's value in the normalized point
+    scale_factor = 1.0 / dominant_axis
+    projected_point = normalized_point * scale_factor
+    
+    return projected_point
