@@ -4,3 +4,6 @@ pyautogui
 noise
 numpy
 scipy
+Pmw
+numba
+tqdm

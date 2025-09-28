@@ -1,6 +1,6 @@
 # minimal-game-engine
 
-Minimal game engine written in python.
+Minimal voxel engine with breakable physics, written in python.
 
 ## Instructions
 
@@ -16,14 +16,18 @@ Minimal game engine written in python.
 
 ### How to run
 
-* Run it like so in the terminal: `python game_engine.py` for a flat world experience.
-* Run it with the terrain flag: `python game_engine.py --terrain=perlin` for a world generated with perlin noise, else `flat`
-* Run it with the texture flag: `python game_engine.py --texture=grass` for a grass textured world, else `chess`
+* Run it like so in the terminal: `python game_engine.py` for a procedurally generated world experience.
+* possibly try to run like this:
+    `__NV_PRIME_RENDER_OFFLOAD=1 \
+    __GLX_VENDOR_LIBRARY_NAME=nvidia \
+    __VK_LAYER_NV_optimus=NVIDIA_only \
+    python game_engine.py`
+
+
 
 ### Controls
 
-Use the keys `a`,`s`,`d`,`w` to steer the position of the camera and use the mouse to steer the angle of the camera. Use left and right mouse click to shot
-small and big bullets respectively. Use `f` key to place blocks.
+Use the keys `wasd` to steer the position of the camera and use the mouse to steer the angle of the camera.
 
 ## Demo
 ### Collision physics:
@@ -32,7 +36,7 @@ small and big bullets respectively. Use `f` key to place blocks.
 ### Gravity:
 ![Semi-autogpt example](docs/demo2.gif)
 
-### Many-body physics:
+### Multi-collision physics:
 ![Semi-autogpt example](docs/demo3.gif)
 
 ### Procedural generated terrain:

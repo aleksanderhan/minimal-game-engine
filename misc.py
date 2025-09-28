@@ -1,30 +1,17 @@
 import numpy as np
-import noise
-import pyautogui
-import argparse
-
-from direct.showbase.ShowBase import ShowBase
-from direct.task import Task
-from direct.showbase.InputStateGlobal import inputState
-from direct.gui.OnscreenText import OnscreenText
-from direct.actor.Actor import Actor
+from math import cos, sin, radians
+from direct.stdpy.threading import Lock
+from typing import Iterator
 
 from panda3d.core import (
     CardMaker, Vec3
 )
 from panda3d.bullet import (
-    BulletWorld, BulletPlaneShape, BulletRigidBodyNode, BulletSphereShape,
-    BulletTriangleMesh, BulletTriangleMeshShape, BulletHeightfieldShape  # Conceptual
+    BulletRigidBodyNode, BulletSphereShape,
 )
-from panda3d.bullet import BulletRigidBodyNode, BulletCapsuleShape
-from panda3d.core import NodePath
-from panda3d.bullet import BulletWorld, BulletRigidBodyNode, BulletSphereShape, BulletCylinderShape, BulletHingeConstraint, BulletDebugNode
+from panda3d.bullet import BulletRigidBodyNode, BulletSphereShape, BulletCylinderShape, BulletHingeConstraint, BulletDebugNode
 from panda3d.core import Vec3, TransformState
-from math import cos, sin, radians
-from panda3d.core import Texture
-import random
 from panda3d.core import TransformState, Vec3
-
 
 
 def build_robot(physicsWorld, position=(10, 10, 10)):
@@ -100,8 +87,28 @@ def build_robot(physicsWorld, position=(10, 10, 10)):
         physicsWorld.attachConstraint(hinge_joint)
 
 
-# Toggle generator. Returns a or b alternatingly on next()
-def toggle(a, b, yield_a=True):
-    while True:
-        (yield a) if yield_a else (yield b)
-        yield_a = not yield_a
+class ConcurrentSet:
+
+    def __init__(self):
+        self.lock = Lock()
+        self.set = set()
+
+    def add(self, item: Any):
+        with self.lock:
+            self.set.add(item)
+
+    def remove(self, item: Any):
+        with self.lock:
+            self.set.remove(item)
+
+    def __contains__(self, item: Any) -> bool:
+        with self.lock:
+            return item in self.set
+        
+    def __sub__(self, other_set: set[Any]) -> set[Any]:
+        return self.set - other_set
+    
+    def __iter__(self) -> Iterator[Any]:
+        with self.lock:
+            # Make a copy for safe iteration
+            return iter(list(self.set))
