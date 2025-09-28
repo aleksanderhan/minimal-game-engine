@@ -17,10 +17,17 @@ Minimal voxel engine with breakable physics, written in python.
 ### How to run
 
 * Run it like so in the terminal: `python game_engine.py` for a procedurally generated world experience.
+* possibly try to run like this:
+    `__NV_PRIME_RENDER_OFFLOAD=1 \
+    __GLX_VENDOR_LIBRARY_NAME=nvidia \
+    __VK_LAYER_NV_optimus=NVIDIA_only \
+    python game_engine.py`
+
+
 
 ### Controls
 
-Use the keys `a`,`s`,`d`,`w` to steer the position of the camera and use the mouse to steer the angle of the camera.
+Use the keys `wasd` to steer the position of the camera and use the mouse to steer the angle of the camera.
 
 ## Demo
 ### Collision physics:

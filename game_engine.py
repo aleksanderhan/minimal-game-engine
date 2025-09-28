@@ -23,7 +23,7 @@ from panda3d.bullet import (
 )
 from panda3d.core import Vec3, Vec2
 from panda3d.core import TransparencyAttrib
-from panda3d.core import WindowProperties
+from panda3d.core import WindowProperties, GraphicsWindow
 from panda3d.core import NodePath
 from panda3d.core import Thread
 
@@ -51,6 +51,15 @@ loadPrcFileData("", "load-file-type p3assimp")
 loadPrcFileData("", "bullet-enable-contact-events true")
 loadPrcFileData('', 'win-size 1680 1050')
 loadPrcFileData("", "threading-model Cull/Draw")
+loadPrcFileData('', 'load-display pandagl')
+loadPrcFileData("", "cursor-hidden true")
+
+loadPrcFileData('', 'framebuffer-srgb false')
+loadPrcFileData('', 'framebuffer-multisample 0')
+loadPrcFileData('', 'multisamples 0')
+loadPrcFileData('', 'color-bits 24')
+loadPrcFileData('', 'depth-bits 24')
+loadPrcFileData('', 'alpha-bits 8')
 
 def pre_warm_jit_functions():
     print("Pre warming jit functions. Hold tight!")
@@ -134,7 +143,7 @@ class GameEngine(ShowBase):
 
         self.build_mode = False
         self.placeholder_cube: NodePath = None
-        self.spawn_distance = 1.5
+        self.spawn_distance = 2.5
 
         self.selected_voxel_type_value = 0
         self.selected_voxel_type = VoxelType.AIR
@@ -276,7 +285,7 @@ class GameEngine(ShowBase):
         return cube
         
     def create_and_place_voxel(self):
-        raycast_result = self.cast_ray_from_camera()
+        raycast_result = self.cast_ray_from_camera(self.spawn_distance)
 
         if raycast_result.hasHit():
             # place voxel on ground or attatch to face of other voxel
@@ -602,7 +611,7 @@ class GameEngine(ShowBase):
                 self.lastMouseX, self.lastMouseY = 0, 0  # Reset last mouse position to the center
             else:
                 self.lastMouseX, self.lastMouseY = mouseX, mouseY
-
+        
         return Task.cont
 
     def init_fps_counter(self):
@@ -671,8 +680,8 @@ if __name__ == "__main__":
     parser.add_argument('--normals', action="store_true", default=False)
     parser.add_argument('--profile', action="store_true", default=False)
     parser.add_argument('-g', action="store", default=-9.81, type=float)
-    parser.add_argument('-n', action="store", default=16, type=int)
-    parser.add_argument('-r', action="store", default=16, type=int)
+    parser.add_argument('-n', action="store", default=12, type=int)
+    parser.add_argument('-r', action="store", default=12, type=int)
     args = parser.parse_args()
 
     game = GameEngine(args)
@@ -682,12 +691,6 @@ if __name__ == "__main__":
         loadPrcFileData('', 'want-pstats 1')
         cProfile.run('game.run()', 'profile_stats')
 
-    # Create a WindowProperties object
-    props = WindowProperties()
-    # Set the cursor visibility to False
-    props.setCursorHidden(False)
-    # Apply the properties to the main window
-    game.win.requestProperties(props)
     game.run()
 
     if args.debug or args.profile:
