@@ -1,2 +1,4 @@
 __pycache__/
 profile_stats
+
+*.pt
