@@ -231,6 +231,7 @@ class NPCBrain:
 
         if should_speak:
             utterance = self._generate_dialogue(prompt)
+            print("utterance:", utterance)
 
         return NPCPolicyOutput(
             action_name=action_name,
