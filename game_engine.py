@@ -43,6 +43,8 @@ from jit import (
     _generate_face_vertices, _check_surrounding_air
 )
 from util import toggle, create_voxel_type_value_color_list
+from npc_model import NPCBrain
+from npc_agent import NPCAgent, OBS_DIM
 
 
 random.seed(1337)
@@ -157,6 +159,7 @@ class GameEngine(ShowBase):
         pre_warm_jit_functions()
         self.setup_physics()
         self.setup_environment()
+        self.setup_npc()
         self.setup_lighting()
         self.setup_crosshair()
         self.setup_movement_controls()
@@ -184,6 +187,23 @@ class GameEngine(ShowBase):
         #build_robot(self.physics_world)
         self.create_dynamic_voxel(Vec3(0, 0, 5), Vec3(0, 0, 0), Quat(0, 0, 0, 0), VoxelType.GRASS)
         pass
+
+    def setup_npc(self):
+        brain = NPCBrain(
+            model_name="google/gemma-4-E2B-it",
+            checkpoint_path="npc_checkpoint",
+            obs_dim=OBS_DIM,
+            device="cuda",
+        )
+
+        self.npc_agent = NPCAgent(
+            game_engine=self,
+            brain=brain,
+            position=Vec3(2, 2, 3),
+            ai_hz=1/10,
+        )
+
+        self.taskMgr.add(self.npc_agent.update, "UpdateNPCAgent")
 
     def on_mouse_wheel_up(self):
         self.selected_voxel_type_value = (self.selected_voxel_type_value + 1) % (len(VoxelType) - 1)

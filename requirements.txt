@@ -7,3 +7,8 @@ scipy
 Pmw
 numba
 tqdm
+huggingface_hub
+transformers
+torch
+bitsandbytes
+accelerate
