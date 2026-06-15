@@ -126,9 +126,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-name", default="google/gemma-4-E2B-it")
     parser.add_argument("--output", default="npc_policy.pt")
-    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--device", default="cuda")
     parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--max-length", type=int, default=256)
     args = parser.parse_args()
@@ -143,9 +143,9 @@ def main():
         model_name=args.model_name,
         obs_dim=OBS_DIM,
         num_actions=len(ACTION_NAMES),
-        device="cuda",
+        device=args.device,
         use_4bit=True,
-    ).to(device)
+    )
 
     for param in model.llm.parameters():
         param.requires_grad = False

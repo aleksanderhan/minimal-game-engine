@@ -191,7 +191,7 @@ class GameEngine(ShowBase):
     def setup_npc(self):
         brain = NPCBrain(
             model_name="google/gemma-4-E2B-it",
-            checkpoint_path="npc_checkpoint",
+            checkpoint_path="npc_policy.pt",
             obs_dim=OBS_DIM,
             device="cuda",
         )

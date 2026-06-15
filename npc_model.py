@@ -167,7 +167,7 @@ class NPCBrain:
             num_actions=len(ACTION_NAMES),
             device=device,
             use_4bit=True,
-        ).to(self.device)
+        )
 
         checkpoint = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_state_dict(checkpoint["model"])
