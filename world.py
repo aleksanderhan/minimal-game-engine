@@ -81,7 +81,7 @@ def get_center_of_hit_static_voxel(hit_pos: Vec3, hit_normal: Vec3, voxel_size: 
 
     return Vec3(voxel_center_x, voxel_center_y, voxel_center_z)
 
-def create_voxel_world(chunk_size: int, max_height: int, chunk_coordinates: tuple[int, int], voxel_size: float) -> VoxelWorld:
+def create_voxel_world(chunk_size: int, max_height: int, chunk_coordinates: tuple[int, int], voxel_size: float, terrain: str) -> VoxelWorld:
     width = chunk_size
     depth = chunk_size
     
@@ -89,8 +89,10 @@ def create_voxel_world(chunk_size: int, max_height: int, chunk_coordinates: tupl
     world_array = np.zeros((width, depth, max_height), dtype=int)
     
     # Generate or retrieve heightmap for this chunk
-    #heightmap = generate_flat_height_map(chunk_size, height=1)
-    heightmap = generate_perlin_height_map(chunk_size, chunk_coordinates)
+    if terrain == "flat":
+        heightmap = generate_flat_height_map(chunk_size, height=1)
+    elif terrain == "perlin":
+        heightmap = generate_perlin_height_map(chunk_size, chunk_coordinates)
     
     # Convert heightmap values to integer height levels, ensuring they do not exceed max_height
     height_levels = np.floor(heightmap).astype(int)

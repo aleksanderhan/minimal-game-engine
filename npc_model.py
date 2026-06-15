@@ -60,7 +60,7 @@ class NPCModel(nn.Module):
             quantization_config=quantization_config,
             device_map=device_map,
             torch_dtype=torch.bfloat16 if device.startswith("cuda") else torch.float32,
-            output_hidden_states=True,
+            output_hidden_states=False,
         )
 
         hidden_dim = self.llm.config.text_config.hidden_size
@@ -97,18 +97,21 @@ class NPCModel(nn.Module):
         attention_mask: torch.Tensor,
         obs: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        input_ids = input_ids.to(self.runtime_device)
-        attention_mask = attention_mask.to(self.runtime_device)
-        obs = obs.to(self.runtime_device)
+        llm_device = self.llm.get_input_embeddings().weight.device
 
-        outputs = self.llm(
+        input_ids = input_ids.to(llm_device)
+        attention_mask = attention_mask.to(llm_device)
+        obs = obs.to(llm_device)
+
+        outputs = self.llm.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            output_hidden_states=True,
+            output_hidden_states=False,
             return_dict=True,
+            use_cache=False,
         )
 
-        last_hidden = outputs.hidden_states[-1]
+        last_hidden = outputs.last_hidden_state
 
         last_valid_indices = (
             attention_mask.shape[1]
@@ -118,7 +121,7 @@ class NPCModel(nn.Module):
 
         batch_indices = torch.arange(
             input_ids.shape[0],
-            device=input_ids.device,
+            device=llm_device,
         )
 
         text_hidden = last_hidden[batch_indices, last_valid_indices, :].float()
@@ -138,7 +141,6 @@ class NPCModel(nn.Module):
         )
 
         return {
-            "language_logits": outputs.logits,
             "action_logits": self.action_head(fused_hidden),
             "control": self.control_head(fused_hidden),
             "speak_logits": self.speak_head(fused_hidden),
@@ -169,12 +171,29 @@ class NPCBrain:
             use_4bit=True,
         )
 
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["model"])
+        checkpoint = torch.load(checkpoint_path, map_location="cpu")
+        state_dict = checkpoint["npc_model"]
+        missing_keys, unexpected_keys = self.model.load_state_dict(
+            state_dict,
+            strict=False,
+        )
+
+        unexpected_non_empty = [
+            key for key in unexpected_keys
+            if not key.startswith("llm.")
+        ]
+
+        if unexpected_non_empty:
+            raise RuntimeError(f"Unexpected checkpoint keys: {unexpected_non_empty}")
+
+        del checkpoint
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         self.model.eval()
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def act(self, observation: np.ndarray, prompt: str) -> NPCPolicyOutput:
         encoded = self.tokenizer(
             prompt,
@@ -222,7 +241,7 @@ class NPCBrain:
             utterance=utterance,
         )
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def _generate_dialogue(self, prompt: str) -> str:
         dialogue_prompt = prompt + "\nNPC:"
         encoded = self.tokenizer(

@@ -77,8 +77,9 @@ class RePriorityQueue:
 
 class ChunkManager:
     
-    def __init__(self, game_engine):
+    def __init__(self, game_engine, terrain):
         self.game_engine = game_engine
+        self.terrain = terrain
 
         self.loaded_chunks: dict[tuple[int, int], VoxelWorld] = {}
 
@@ -139,7 +140,8 @@ class ChunkManager:
                         self.game_engine.chunk_size, 
                         self.game_engine.max_height, 
                         self.game_engine.voxel_size,
-                        self.game_engine.args.debug
+                        self.game_engine.args.debug,
+                        self.terrain
                     )
                     self.pool.apply_async(ChunkManager._worker, params, callback=self._callback, error_callback=self._error_callback)
                     self.tasks_actively_being_loaded.add(load_task.id)
@@ -151,10 +153,11 @@ class ChunkManager:
                 chunk_size: int, 
                 max_height: int, 
                 voxel_size:int, 
-                debug: bool) -> tuple[tuple[int, int], VoxelWorld, np.ndarray, np.ndarray]:
+                debug: bool,
+                terrain: str) -> tuple[tuple[int, int], VoxelWorld, np.ndarray, np.ndarray]:
         
         # Generate the chunk and obtain both visual (terrain_np) and physics components (terrain_node)
-        voxel_world = create_voxel_world(chunk_size, max_height, coordinates, voxel_size)
+        voxel_world = create_voxel_world(chunk_size, max_height, coordinates, voxel_size, terrain)
         voxel_world.chunk_coord = coordinates
         
         vertices, indices = create_mesh(voxel_world.world_array, voxel_size, debug)

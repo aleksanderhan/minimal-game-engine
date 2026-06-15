@@ -139,7 +139,7 @@ class GameEngine(ShowBase):
         self.max_height = args.n * 10
         self.chunk_size = 2 * args.n - 1
 
-        self.chunk_manager = ChunkManager(self)
+        self.chunk_manager = ChunkManager(self, args.terrain)
         self.object_manager = ObjectManager(self)
         self.info_display = None
 
@@ -200,7 +200,7 @@ class GameEngine(ShowBase):
             game_engine=self,
             brain=brain,
             position=Vec3(2, 2, 3),
-            ai_hz=1/10,
+            ai_hz=1/2,
         )
 
         self.taskMgr.add(self.npc_agent.update, "UpdateNPCAgent")

@@ -215,12 +215,20 @@ def main():
                 }
             )
 
+    npc_state_dict = {
+        key: value.detach().cpu()
+        for key, value in model.state_dict().items()
+        if not key.startswith("llm.")
+    }
+
     torch.save(
         {
-            "model": model.state_dict(),
+            "npc_model": npc_state_dict,
             "action_names": ACTION_NAMES,
             "obs_dim": OBS_DIM,
             "model_name": args.model_name,
+            "use_4bit": "true",
+            "bnb_4bit_quant_type": "nf4",
         },
         args.output,
     )

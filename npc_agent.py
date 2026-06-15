@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+from concurrent.futures import Future, ThreadPoolExecutor
 
 import numpy as np
 
@@ -27,8 +27,11 @@ class NPCAgent:
         self.game_engine = game_engine
         self.brain = brain
         self.ai_interval = 1.0 / ai_hz
-        self.time_since_ai_update = 0.0
-        self.max_speed = 3.0 * self.game_engine.voxel_size
+        self.time_since_ai_submit = 0.0
+        self.max_speed = 3.0
+
+        self.ai_executor = ThreadPoolExecutor(max_workers=1)
+        self.pending_ai_future: Future[NPCPolicyOutput] | None = None
 
         self.object = create_dynamic_single_voxel_object(
             self.game_engine.voxel_size,
@@ -64,17 +67,56 @@ class NPCAgent:
     def update(self, task: Task) -> int:
         dt = globalClock.getDt()
 
-        self.time_since_ai_update += dt
-        if self.time_since_ai_update >= self.ai_interval:
-            self.time_since_ai_update = 0.0
-            observation = self._collect_observation()
-            prompt = self._make_prompt(observation)
-            self.current_policy_output = self.brain.act(observation, prompt)
-            self._update_dialogue(self.current_policy_output)
+        self._consume_finished_ai_result()
+
+        self.time_since_ai_submit += dt
+        if self.time_since_ai_submit >= self.ai_interval:
+            self.time_since_ai_submit = 0.0
+            self._submit_ai_job_if_idle()
 
         self._apply_policy_output(self.current_policy_output)
 
         return Task.cont
+
+    def shutdown(self):
+        self.ai_executor.shutdown(wait=False, cancel_futures=True)
+
+    def _submit_ai_job_if_idle(self):
+        if self.pending_ai_future is not None:
+            return
+
+        observation = self._collect_observation()
+        prompt = self._make_prompt(observation)
+
+        self.pending_ai_future = self.ai_executor.submit(
+            self.brain.act,
+            observation.copy(),
+            prompt,
+        )
+
+    def _consume_finished_ai_result(self):
+        if self.pending_ai_future is None:
+            return
+
+        if not self.pending_ai_future.done():
+            return
+
+        try:
+            self.current_policy_output = self.pending_ai_future.result()
+            self._update_dialogue(self.current_policy_output)
+        except Exception as exc:
+            print(f"NPC AI worker error: {exc}")
+            self.current_policy_output = NPCPolicyOutput(
+                action_name="idle",
+                speed=0.0,
+                strafe=0.0,
+                jump=0.0,
+                should_speak=False,
+                utterance="",
+            )
+            self._update_dialogue(self.current_policy_output)
+        finally:
+            self.pending_ai_future = None
 
     def _collect_observation(self) -> np.ndarray:
         npc_pos = self.object.get_position()
@@ -168,7 +210,17 @@ Choose one physical action and optionally speak.
         if movement.length() > 1e-6:
             movement.normalize()
 
-        velocity = movement * self.max_speed * policy_output.speed
+        movement_speed = policy_output.speed
+
+        if policy_output.action_name in {
+            "approach_player",
+            "back_away",
+            "strafe_left",
+            "strafe_right",
+        }:
+            movement_speed = max(movement_speed, 0.75)
+
+        velocity = movement * self.max_speed * movement_speed
 
         current_velocity = self.object.get_velocity()
         self.object.set_velocity(
@@ -183,4 +235,4 @@ Choose one physical action and optionally speak.
         if policy_output.should_speak and policy_output.utterance:
             self.dialogue_text.setText(f"NPC: {policy_output.utterance}")
         else:
-            self.dialogue_text.setText(f"NPC action: {policy_output.action_name}")
+            self.dialogue_text.setText(f"NPC action: {policy_output.action_name}")  
