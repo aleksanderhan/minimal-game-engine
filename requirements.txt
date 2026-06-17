@@ -10,5 +10,6 @@ tqdm
 huggingface_hub
 transformers
 torch
+torchvision
 bitsandbytes
 accelerate

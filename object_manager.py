@@ -39,6 +39,10 @@ color_map = {
 
 
 class DynamicObject:
+    pass
+
+
+class DynamicSphereObject(DynamicObject):
     def __init__(
         self,
         scale: float,
@@ -46,11 +50,12 @@ class DynamicObject:
         node: BulletRigidBodyNode,
         model_file: str,
         name: str = "object",
-        kind: str = "object",
         color_name: str = "unknown",
         tags: set[str] | None = None,
         debug: bool = False,
     ):
+        self.kind = "sphere"
+        
         self.scale = scale
         self.shape = shape
         self.node = node
@@ -59,7 +64,6 @@ class DynamicObject:
         self.node_path: NodePath | None = None
 
         self.name = name
-        self.kind = kind
         self.color_name = color_name
         self.tags = tags or set()
 
@@ -68,7 +72,7 @@ class DynamicObject:
         
 
     def __str__(self) -> str:
-        return "DynamicObject: " + self.name + " id: " + self.id + "\n" \
+        return "DynamicSphereObject: " + self.name + " id: " + self.id + "\n" \
             + " position:" + str(self.get_position()) + " orientation:" + str(self.get_orientation()) + " velocity:" + str(self.get_velocity()) + "\n" \
             + " vertices:" + str(len(self.vertices)) + " indices:" + str(len(self.indices)) + "\n" \
 
@@ -90,13 +94,12 @@ class DynamicObject:
         sphere_node.addShape(sphere_shape)
         sphere_node.setMass(mass)
 
-        return DynamicObject(
+        return DynamicSphereObject(
             scale=scale,
             shape=sphere_shape,
             node=sphere_node,
             model_file="models/misc/sphere.egg",
             name=name,
-            kind="ball",
             color_name=color_name,
             tags=tags or {"physics_object", "movable"},
         )
@@ -122,7 +125,7 @@ class DynamicObject:
         node.setCcdSweptSphereRadius(ccd_radius)
 
 
-class DynamicArbitraryVoxelObject:
+class DynamicArbitraryVoxelObject(DynamicObject):
 
     def __init__(self, 
                  voxel_array: np.ndarray, 
@@ -130,6 +133,7 @@ class DynamicArbitraryVoxelObject:
                  name: str = "DynamicArbitraryVoxelObject",
                  debug: bool = False):
 
+        self.kind = "davo"
         self.voxel_array = voxel_array
         self.voxel_size = voxel_size
 
@@ -140,7 +144,7 @@ class DynamicArbitraryVoxelObject:
         self.id = str(uuid.uuid4())
         
         self.node: BulletRigidBodyNode = self._build_node()
-        self.node_np: NodePath = None
+        self.node_path: NodePath = None
 
     def __str__(self) -> str:
         return "DynamicArbitraryVoxelObject: " + self.name + " id: " + self.id + "\n" \
@@ -160,16 +164,16 @@ class DynamicArbitraryVoxelObject:
 
     def add_voxel(self, hit_pos: Vec3, hit_normal: Vec3, voxel_type: VoxelType):
         
-        print("node.pos", self.node_np.getPos())
+        print("node.pos", self.node_path.getPos())
         print("hit_pos", hit_pos)
 
-        relative_pos = hit_pos - self.node_np.getPos()
+        relative_pos = hit_pos - self.node_path.getPos()
         print("relative_pos", relative_pos)
 
         adjusted_pos = project_sphere_point_to_cube(relative_pos)
         print("adjusted_pos", adjusted_pos)
 
-        orientation = self.node_np.getQuat()
+        orientation = self.node_path.getQuat()
 
         # Convert the hit normal to the local space of the voxel
         local_hit_normal = to_local_space(hit_normal, orientation)
@@ -221,20 +225,20 @@ class DynamicArbitraryVoxelObject:
         self.voxel_array = np.pad(self.voxel_array, pad_width=pad_width, mode='constant', constant_values=0)
 
     def get_position(self) -> Point3:
-        return self.node_np.getPos()
+        return self.node_path.getPos()
 
     def get_orientation(self) -> Quat:
-        return self.node_np.getQuat()
+        return self.node_path.getQuat()
     
     def get_velocity(self) -> Vec3:
-        return self.node_np.node().getLinearVelocity()
+        return self.node_path.node().getLinearVelocity()
     
     def set_velocity(self, velocity: Vec3):
-        node = self.node_np.node()
+        node = self.node_path.node()
         node.setLinearVelocity(velocity)
 
     def enable_ccd(self):
-        node = self.node_np.node()
+        node = self.node_path.node()
         #voxel_diagonal = math.sqrt(3 * self.voxel_size**2)
         ccd_radius = self.voxel_size / 2 #voxel_diagonal / 2
         node.setCcdMotionThreshold(1e-7)
@@ -255,7 +259,7 @@ class ObjectManager:
         self.object_map = {}
 
     def register_object(self, 
-                        dynamic_object: DynamicObject | DynamicArbitraryVoxelObject,
+                        dynamic_object: DynamicObject,
                         position: Vec3, 
                         velocity = Vec3(0, 0, 0), 
                         orientation = Quat(0, 0, 0, 0),
@@ -268,25 +272,20 @@ class ObjectManager:
         node_path.setQuat(orientation)
 
         if isinstance(dynamic_object, DynamicArbitraryVoxelObject):
-            geom_node_path = create_geometry(object.vertices, object.indices)
+            geom_node_path = create_geometry(dynamic_object.vertices, dynamic_object.indices)
             geom_node_path.reparentTo(self.game_engine.render)
             geom_node_path.reparentTo(node_path)
+        elif isinstance(dynamic_object, DynamicSphereObject):
+            sphere = self.game_engine.loader.loadModel(dynamic_object.model_file)
+            sphere.setScale(dynamic_object.scale)  # Adjust the scale as needed
 
-        # Load the sphere model and attach it to the physics node
-        sphere = self.game_engine.loader.loadModel(dynamic_object.model_file)
-        sphere.setScale(dynamic_object.scale)  # Adjust the scale as needed
-
-        color = color_map.get(dynamic_object.color_name, (1, 1, 1, 1))
-        sphere.setColor(*color)  # Set the sphere's color
-        sphere.reparentTo(node_path)  # Correctly attach the model to the NodePath
+            color = color_map.get(dynamic_object.color_name, (1, 1, 1, 1))
+            sphere.setColor(*color)  # Set the sphere's color
+            sphere.reparentTo(node_path)  # Correctly attach the model to the NodePath
 
         node_path.setPythonTag("object", dynamic_object)
         dynamic_object.node_path = node_path
         self.object_map[dynamic_object.id] = dynamic_object
-
-        #geom_np = create_geometry(dynamic_object.vertices, dynamic_object.indices)
-        #geom_np.reparentTo(self.game_engine.render)
-        #geom_np.reparentTo(node_np)
 
         dynamic_object.set_velocity(velocity)
         ccd = velocity.length() > 50

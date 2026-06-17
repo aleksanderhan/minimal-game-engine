@@ -1,34 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from panda3d.core import Point3, Vec3
 
 from npc_command import TargetRef
-
-
-@dataclass(frozen=True)
-class ObjectQuery:
-    kind: str | None = None
-    color_name: str | None = None
-    name_contains: str | None = None
-    required_tags: set[str] = field(default_factory=set)
-
-    def matches(self, object_view: "ObjectView") -> bool:
-        if self.kind is not None and object_view.kind != self.kind:
-            return False
-
-        if self.color_name is not None and object_view.color_name != self.color_name:
-            return False
-
-        if self.name_contains is not None:
-            if self.name_contains.lower() not in object_view.name.lower():
-                return False
-
-        if not self.required_tags.issubset(object_view.tags):
-            return False
-
-        return True
 
 
 @dataclass(frozen=True)
@@ -65,21 +41,6 @@ class WorldView:
             return None
 
         return min(self.objects, key=lambda object_view: object_view.distance_to_npc)
-
-    def objects_matching(self, query: ObjectQuery) -> list[ObjectView]:
-        return [
-            object_view
-            for object_view in self.objects
-            if query.matches(object_view)
-        ]
-
-    def nearest_matching_object(self, query: ObjectQuery) -> ObjectView | None:
-        matches = self.objects_matching(query)
-
-        if not matches:
-            return None
-
-        return min(matches, key=lambda object_view: object_view.distance_to_npc)
 
 
 class TargetPositionResolver:

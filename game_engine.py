@@ -9,6 +9,7 @@ import tqdm
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
 from direct.showbase.InputStateGlobal import inputState
+from direct.gui.DirectEntry import DirectEntry
 from direct.gui.OnscreenText import OnscreenText
 from direct.gui.OnscreenImage import OnscreenImage
 
@@ -40,12 +41,11 @@ from jit import (
 )
 from util import toggle, create_voxel_type_value_color_list
 from npc_agent import NPCAgent
-from npc_brain import NPCActionClassifier, NPCBrain, NPCTextResponder
+from npc_brain import NPCBrain
 from npc_controller import NPCMovementController
 from npc_perception import NPCPerception
-from npc_target_resolver import NPCTargetResolver
 from npc_world import TargetPositionResolver
-from object_manager import DynamicObject, DynamicArbitraryVoxelObject, ObjectManager
+from object_manager import DynamicSphereObject, DynamicArbitraryVoxelObject, ObjectManager
 
 
 random.seed(1337)
@@ -123,6 +123,7 @@ class GameEngine(ShowBase):
         self.setup_movement_controls()
         self.init_fps_counter()
         self.init_mouse_control()
+        self.setup_chat_input()
         if self.args.debug:
             self.add_axes()
         
@@ -140,26 +141,84 @@ class GameEngine(ShowBase):
         self.accept('i', self.print_world_info)
         self.accept('wheel_up', self.on_mouse_wheel_up)
         self.accept('wheel_down', self.on_mouse_wheel_down)
+        self.accept("t", self.toggle_chat_input)
+        self.accept("escape", self.close_chat_input)
+    
+    def setup_chat_input(self):
+        self.chat_active = False
+        self.chat_entry = DirectEntry(
+            text="",
+            scale=0.05,
+            pos=(-1.3, 0, -0.9),
+            width=32,
+            numLines=1,
+            focus=0,
+            command=self.submit_chat_message,
+            initialText="",
+        )
+        self.chat_entry.hide()
+
+        self.chat_hint = OnscreenText(
+            text="Press T to talk",
+            pos=(-1.3, -0.84),
+            scale=0.045,
+            fg=(1, 1, 1, 1),
+            align=TextNode.ALeft,
+            mayChange=True,
+        )
+
+    def toggle_chat_input(self):
+        if self.chat_active:
+            return
+
+        self.open_chat_input()
+
+    def open_chat_input(self):
+        self.chat_active = True
+        self.chat_entry.show()
+        self.chat_entry["focus"] = 1
+        self.chat_hint.setText("Type message, press Enter")
+
+
+    def close_chat_input(self):
+        self.chat_active = False
+        self.chat_entry["focus"] = 0
+        self.chat_entry.enterText("")
+        self.chat_entry.hide()
+        self.chat_hint.setText("Press T to talk")
+
+
+    def submit_chat_message(self, text: str):
+        message = text.strip()
+
+        self.chat_active = False
+        self.chat_entry.enterText("")
+        self.chat_entry["focus"] = 0
+        self.chat_entry.hide()
+        self.chat_hint.setText("Press T to talk")
+
+        if message:
+            self.npc_agent.receive_player_message(message)
 
     def setup_environment(self):
         #build_robot(self.physics_world)
         #self.create_dynamic_voxel(Vec3(0, 0, 5), Vec3(0, 0, 0), Quat(0, 0, 0, 0), VoxelType.GRASS)
         spheres = [
-            DynamicObject.create_sphere(
+            DynamicSphereObject.create_sphere(
                 scale=1,
                 mass=10,
                 name=f"red ball 1",
                 color_name="red",
                 tags={"ball", "red"},
             ),
-            DynamicObject.create_sphere(
+            DynamicSphereObject.create_sphere(
                 scale=1,
                 mass=10,
                 name=f"green ball 1",
                 color_name="green",
                 tags={"ball", "green"},
             ),
-            DynamicObject.create_sphere(
+            DynamicSphereObject.create_sphere(
                 scale=1,
                 mass=10,
                 name=f"blue ball 1",
@@ -171,13 +230,13 @@ class GameEngine(ShowBase):
         for index, sphere_object in enumerate(spheres):
             self.object_manager.register_object(
                 sphere_object,
-                position=Point3(5, 5, 10 + index * 5),
+                position=Point3(10 * index, 10 * index, 5),
                 velocity=Vec3(0, 0, 0),
                 orientation=Quat.identQuat(),
             )
 
     def setup_npc(self):
-        npc_object = DynamicObject.create_sphere(
+        npc_object = DynamicSphereObject.create_sphere(
             scale=1,
             mass=2,
             name="npc",
@@ -187,7 +246,7 @@ class GameEngine(ShowBase):
 
         self.object_manager.register_object(
             npc_object,
-            position=Point3(2, 2, 3),
+            position=Point3(0, 0, 1),
             velocity=Vec3(0, 0, 0),
             orientation=Quat.identQuat(),
         )
@@ -207,9 +266,7 @@ class GameEngine(ShowBase):
         )
 
         brain = NPCBrain(
-            action_classifier=NPCActionClassifier(),
-            text_responder=NPCTextResponder(),
-            target_resolver=NPCTargetResolver(),
+            debug=self.args.debug,
         )
 
         self.npc_agent = NPCAgent(
@@ -223,16 +280,25 @@ class GameEngine(ShowBase):
         self.taskMgr.add(self.npc_agent.update, "UpdateNPCAgent")
 
     def on_mouse_wheel_up(self):
+        if self.chat_active:
+            return None
+        
         self.selected_voxel_type_value = (self.selected_voxel_type_value + 1) % (len(VoxelType) - 1)
         self.selected_voxel_type = voxel_type_map[self.selected_voxel_type_value]
         print("selected_voxel_type_value", self.selected_voxel_type.name)
 
     def on_mouse_wheel_down(self):
+        if self.chat_active:
+            return None
+        
         self.selected_voxel_type_value = (self.selected_voxel_type_value - 1) % (len(VoxelType) - 1)
         self.selected_voxel_type = voxel_type_map[self.selected_voxel_type_value]
         print("selected_voxel_type_value", self.selected_voxel_type.name)
 
     def print_world_info(self):
+        if self.chat_active:
+            return None
+        
         num_surface_voxels = self.chunk_manager.get_number_of_visible_voxels()
         num_chunks_loaded = len(list(self.chunk_manager.loaded_chunks))
         print("--- World info ---")
@@ -240,6 +306,9 @@ class GameEngine(ShowBase):
         print("Number of surface voxels:", num_surface_voxels)
 
     def toggle_build_mode(self):
+        if self.chat_active:
+            return None
+        
         self.build_mode = not self.build_mode
 
         if self.build_mode == True:
@@ -322,6 +391,9 @@ class GameEngine(ShowBase):
         return cube
         
     def create_and_place_voxel(self):
+        if self.chat_active:
+            return None
+        
         raycast_result = self.cast_ray_from_camera(self.spawn_distance)
 
         if raycast_result.hasHit():
@@ -385,7 +457,10 @@ class GameEngine(ShowBase):
             print("time load_chunk", t5-t4)
             print()
     
-    def manual_raycast_test(self):        
+    def manual_raycast_test(self):   
+        if self.chat_active:
+            return None
+             
         raycast_result = self.cast_ray_from_camera(10000)
         if raycast_result.hasHit():
             hit_node = raycast_result.getNode()
@@ -464,9 +539,14 @@ class GameEngine(ShowBase):
             self.physics_world.setDebugNode(debug_np.node())
 
     def toggle_gravity(self):
+        if self.chat_active:
+            return None
+        
         self.physics_world.setGravity(next(self.acceleration_due_to_gravity))
 
     def shoot_voxel(self, speed: float = 100): # TODO: choose speed by how long the user hold in the mouse button
+        if self.chat_active:
+            return None
         # Use the camera's position and orientation to shoot the bullet
         position = self.camera.getPos()
         orientation = self.camera.getQuat()
@@ -625,6 +705,9 @@ class GameEngine(ShowBase):
         self.cameraHeading = 0
     
     def mouse_task(self, task: Task) -> int:
+        if self.chat_active:
+            return Task.cont
+
         if self.mouseWatcherNode.hasMouse():
             mouseX, mouseY = self.mouseWatcherNode.getMouseX(), self.mouseWatcherNode.getMouseY()
             
@@ -683,6 +766,9 @@ class GameEngine(ShowBase):
 
     def move_camera_task(self, task: Task) -> int:
         dt = globalClock.getDt()
+
+        if self.chat_active:
+            return Task.cont
         
         # Lateral movement
         if inputState.isSet('forward'):
