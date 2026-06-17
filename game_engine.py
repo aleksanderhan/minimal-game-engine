@@ -15,23 +15,19 @@ from direct.gui.OnscreenImage import OnscreenImage
 from panda3d.core import (
     AmbientLight, DirectionalLight, KeyboardButton,
     LineSegs, TextNode,
-    loadPrcFileData, GeomVertexReader, Quat
+    loadPrcFileData, GeomVertexReader,
 )
 from panda3d.bullet import (
     BulletWorld, BulletRigidBodyNode, BulletDebugNode,
     BulletTriangleMesh, BulletTriangleMeshShape, BulletClosestHitRayResult
 )
-from panda3d.core import Vec3, Vec2
+from panda3d.core import Vec3, Vec2, Point3, Quat
 from panda3d.core import TransparencyAttrib
 from panda3d.core import WindowProperties, GraphicsWindow
 from panda3d.core import NodePath
 from panda3d.core import Thread
 
 from chunk_manager import ChunkManager
-from voxel import (
-    DynamicArbitraryVoxelObject, create_dynamic_single_voxel_object,
-
-)
 from constants import VoxelType, voxel_type_map
 from world import (
     VoxelWorld, get_center_of_hit_static_voxel, calculate_world_chunk_coordinates, calculate_chunk_world_position,
@@ -43,8 +39,13 @@ from jit import (
     _generate_face_vertices, _check_surrounding_air
 )
 from util import toggle, create_voxel_type_value_color_list
-from npc_model import NPCBrain
-from npc_agent import NPCAgent, OBS_DIM
+from npc_agent import NPCAgent
+from npc_brain import NPCActionClassifier, NPCBrain, NPCTextResponder
+from npc_controller import NPCMovementController
+from npc_perception import NPCPerception
+from npc_target_resolver import NPCTargetResolver
+from npc_world import TargetPositionResolver
+from object_manager import DynamicObject, DynamicArbitraryVoxelObject, ObjectManager
 
 
 random.seed(1337)
@@ -79,49 +80,6 @@ def pre_warm_jit_functions():
     for f in tqdm.tqdm(jit_functions):
         f()
 
-
-class ObjectManager:
-
-    def __init__(self, game_engine):
-        self.game_engine = game_engine
-        self.objects = {}
-
-    def register_object(self, 
-                        object: DynamicArbitraryVoxelObject,
-                        position: Vec3, 
-                        velocity = Vec3(0, 0, 0), 
-                        orientation = Quat(0, 0, 0, 0),
-                        ccd=False):
-        
-        node = object.node
-        node_np = self.game_engine.render.attachNewNode(node)
-        self.game_engine.physics_world.attachRigidBody(node)
-
-        node_np.setPythonTag("object", object)
-        object.node_np = node_np
-        self.objects[object.id] = object
-
-        geom_np = create_geometry(object.vertices, object.indices)
-        geom_np.reparentTo(self.game_engine.render)
-        geom_np.reparentTo(node_np)
-
-        node_np.setPos(position)
-        node_np.setQuat(orientation)
-
-        object.set_velocity(velocity)
-        ccd = velocity.length() > 50
-        if ccd:
-            object.enable_ccd()
-
-
-    def deregister_object(self, object):
-        self.game_engine.physics_world.removeRigidBody(object.node_np.node())
-        object.node_np.removeNode()
-        del self.objects[object.id]
-
-    def update_object(self, object, position, velocity, orientation):
-        self.deregister_object(object)
-        self.register_object(object, position, velocity, orientation)
 
 
 class GameEngine(ShowBase):
@@ -185,22 +143,81 @@ class GameEngine(ShowBase):
 
     def setup_environment(self):
         #build_robot(self.physics_world)
-        self.create_dynamic_voxel(Vec3(0, 0, 5), Vec3(0, 0, 0), Quat(0, 0, 0, 0), VoxelType.GRASS)
-        pass
+        #self.create_dynamic_voxel(Vec3(0, 0, 5), Vec3(0, 0, 0), Quat(0, 0, 0, 0), VoxelType.GRASS)
+        spheres = [
+            DynamicObject.create_sphere(
+                scale=1,
+                mass=10,
+                name=f"red ball 1",
+                color_name="red",
+                tags={"ball", "red"},
+            ),
+            DynamicObject.create_sphere(
+                scale=1,
+                mass=10,
+                name=f"green ball 1",
+                color_name="green",
+                tags={"ball", "green"},
+            ),
+            DynamicObject.create_sphere(
+                scale=1,
+                mass=10,
+                name=f"blue ball 1",
+                color_name="blue",
+                tags={"ball", "blue"},
+            )
+        ]
+
+        for index, sphere_object in enumerate(spheres):
+            self.object_manager.register_object(
+                sphere_object,
+                position=Point3(5, 5, 10 + index * 5),
+                velocity=Vec3(0, 0, 0),
+                orientation=Quat.identQuat(),
+            )
 
     def setup_npc(self):
+        npc_object = DynamicObject.create_sphere(
+            scale=1,
+            mass=2,
+            name="npc",
+            color_name="yellow",
+            tags={"npc"},
+        )
+
+        self.object_manager.register_object(
+            npc_object,
+            position=Point3(2, 2, 3),
+            velocity=Vec3(0, 0, 0),
+            orientation=Quat.identQuat(),
+        )
+
+        perception = NPCPerception(
+            object_manager=self.object_manager,
+            max_visible_objects=12,
+        )
+
+        target_position_resolver = TargetPositionResolver()
+
+        controller = NPCMovementController(
+            dynamic_object=npc_object,
+            target_position_resolver=target_position_resolver,
+            max_speed=5.0,
+            stop_distance=1.5,
+        )
+
         brain = NPCBrain(
-            model_name="google/gemma-4-E2B-it",
-            checkpoint_path="npc_policy.pt",
-            obs_dim=OBS_DIM,
-            device="cuda",
+            action_classifier=NPCActionClassifier(),
+            text_responder=NPCTextResponder(),
+            target_resolver=NPCTargetResolver(),
         )
 
         self.npc_agent = NPCAgent(
             game_engine=self,
+            dynamic_object=npc_object,
+            perception=perception,
             brain=brain,
-            position=Vec3(2, 2, 3),
-            ai_hz=1/2,
+            controller=controller,
         )
 
         self.taskMgr.add(self.npc_agent.update, "UpdateNPCAgent")
@@ -332,7 +349,7 @@ class GameEngine(ShowBase):
             self.create_dynamic_voxel(position, velocity, orientation, self.selected_voxel_type)
 
     def create_dynamic_voxel(self, position: Vec3, velocity: Vec3, orientation: Quat, voxel_type: VoxelType):
-        object = create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.args.debug)
+        object = DynamicArbitraryVoxelObject.create_dynamic_single_voxel_object(self.voxel_size, voxel_type, self.args.debug)
         self.object_manager.register_object(object, position, velocity, orientation)
 
     def create_static_voxel(self, position: Vec3, voxel_type: VoxelType):
